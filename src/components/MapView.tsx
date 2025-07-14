@@ -86,21 +86,25 @@ export function MapView({ userId }: MapViewProps) {
     if (pendingPointsRef.current.length === 0) return;
     
     try {
+      // まずローカル状態を更新
+      const pointsToUpload = [...pendingPointsRef.current];
       setTrackingSession((prev) => {
         if (!prev) return null;
-        const updatedPoints = [...prev.points, ...pendingPointsRef.current];
+        const updatedPoints = [...prev.points, ...pointsToUpload];
         
-        // Firestoreを更新
-        const sessionRef = doc(db, 'sessions', sessionId);
-        updateDoc(sessionRef, {
-          points: updatedPoints
-        });
-        
-        console.log(`Batch upload: ${pendingPointsRef.current.length} points`);
-        pendingPointsRef.current = []; // クリア
+        console.log(`Batch upload: ${pointsToUpload.length} points`);
         
         return { ...prev, points: updatedPoints };
       });
+      
+      // Firestoreを更新
+      const sessionRef = doc(db, 'sessions', sessionId);
+      await updateDoc(sessionRef, {
+        points: [...(trackingSession?.points || []), ...pointsToUpload]
+      });
+      
+      // 成功後にクリア
+      pendingPointsRef.current = [];
     } catch (error) {
       console.error('Batch upload error:', error);
     }
@@ -533,7 +537,7 @@ export function MapView({ userId }: MapViewProps) {
     <div className="relative h-screen w-full">
       <MapContainer
         center={currentPosition || [35.6762, 139.6503]}
-        zoom={15}
+        zoom={17}
         className="h-full w-full"
       >
         <TileLayer
