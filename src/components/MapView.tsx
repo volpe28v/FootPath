@@ -4,6 +4,10 @@ import { LatLngExpression } from 'leaflet';
 import { collection, addDoc, query, where, orderBy, onSnapshot, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { GeoPoint, TrackingSession } from '../types/GeoPoint';
+import type { ExploredArea, ExplorationStats } from '../types/ExploredArea';
+import { ExploredAreaLayer } from './ExploredAreaLayer';
+import { ExplorationStatsComponent } from './ExplorationStats';
+import { generateExploredAreas, calculateExplorationStats, calculateDistance } from '../utils/explorationUtils';
 import 'leaflet/dist/leaflet.css';
 
 interface MapViewProps {
@@ -27,8 +31,34 @@ export function MapView({ userId }: MapViewProps) {
   const [isTracking, setIsTracking] = useState(false);
   const [trackingSession, setTrackingSession] = useState<TrackingSession | null>(null);
   const [allPoints, setAllPoints] = useState<GeoPoint[]>([]);
+  const [exploredAreas, setExploredAreas] = useState<ExploredArea[]>([]);
+  const [explorationStats, setExplorationStats] = useState<ExplorationStats>({
+    totalExploredArea: 0,
+    exploredPoints: 0,
+    explorationLevel: 1,
+    explorationPercentage: 0
+  });
+  const [showExplorationLayer, setShowExplorationLayer] = useState(true);
   const watchIdRef = useRef<number | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 現在のトラッキングセッションの軌跡から探索エリアを更新
+  useEffect(() => {
+    console.log('trackingSession', trackingSession);
+    if (trackingSession && trackingSession.points.length > 0) {
+      console.log('Updating exploration areas from current session:', trackingSession.points.length);
+      
+      // 全ポイントから探索エリアを再生成
+      const newExploredAreas = generateExploredAreas(trackingSession.points, userId);
+      console.log('Generated areas from current session:', newExploredAreas.length);
+      
+      setExploredAreas(newExploredAreas);
+      
+      // 統計も更新
+      const newStats = calculateExplorationStats(newExploredAreas);
+      setExplorationStats(newStats);
+    }
+  }, [trackingSession?.points?.length, userId]);
 
   useEffect(() => {
     const sessionsRef = collection(db, 'sessions');
@@ -44,7 +74,11 @@ export function MapView({ userId }: MapViewProps) {
         const session = doc.data() as TrackingSession;
         points.push(...session.points);
       });
+      console.log('Firestore points received:', points.length);
       setAllPoints(points);
+      
+      // Firestoreからの全ポイントは表示のみに使用
+      // 探索エリアは現在のセッションから生成
     });
 
     return () => unsubscribe();
@@ -155,16 +189,18 @@ export function MapView({ userId }: MapViewProps) {
 
         setCurrentPosition([newPoint.lat, newPoint.lng]);
 
-        const sessionRef = doc(db, 'sessions', sessionId);
-        const updatedPoints = trackingSession ? [...trackingSession.points, newPoint] : [newPoint];
-        
-        await updateDoc(sessionRef, {
-          points: updatedPoints
+        setTrackingSession((prev) => {
+          if (!prev) return null;
+          const updatedPoints = [...prev.points, newPoint];
+          
+          // Firestoreを更新
+          const sessionRef = doc(db, 'sessions', sessionId);
+          updateDoc(sessionRef, {
+            points: updatedPoints
+          });
+          
+          return { ...prev, points: updatedPoints };
         });
-
-        setTrackingSession((prev) => 
-          prev ? { ...prev, points: updatedPoints } : null
-        );
       },
       (error) => {
         console.error('Error tracking location:', error);
@@ -205,17 +241,18 @@ export function MapView({ userId }: MapViewProps) {
             timestamp: new Date()
           };
 
-          const sessionRef = doc(db, 'sessions', sessionId);
-          const currentSession = trackingSession || { points: [] };
-          const updatedPoints = [...currentSession.points, newPoint];
-          
-          await updateDoc(sessionRef, {
-            points: updatedPoints
+          setTrackingSession((prev) => {
+            if (!prev) return null;
+            const updatedPoints = [...prev.points, newPoint];
+            
+            // Firestoreを更新
+            const sessionRef = doc(db, 'sessions', sessionId);
+            updateDoc(sessionRef, {
+              points: updatedPoints
+            });
+            
+            return { ...prev, points: updatedPoints };
           });
-
-          setTrackingSession((prev) => 
-            prev ? { ...prev, points: updatedPoints } : null
-          );
         }
       );
     }, 10000);
@@ -270,8 +307,8 @@ export function MapView({ userId }: MapViewProps) {
     setTrackingSession({ ...newSession, id: sessionId });
 
     // デモ用の移動シミュレーション
-    let lat = currentPosition[0] as number;
-    let lng = currentPosition[1] as number;
+    let lat = Array.isArray(currentPosition) ? currentPosition[0] as number : 35.6812;
+    let lng = Array.isArray(currentPosition) ? currentPosition[1] as number : 139.7671;
     let pointCount = 0;
 
     const demoInterval = setInterval(async () => {
@@ -292,16 +329,21 @@ export function MapView({ userId }: MapViewProps) {
 
       setCurrentPosition([newPoint.lat, newPoint.lng]);
 
-      const sessionRef = doc(db, 'sessions', sessionId);
-      const updatedPoints = trackingSession ? [...trackingSession.points, newPoint] : [newPoint];
-      
-      await updateDoc(sessionRef, {
-        points: updatedPoints
-      });
+      setTrackingSession((prev) => {
+        const currentSession = prev || { points: [], id: sessionId, userId, startTime: new Date(), isActive: true };
+        const updatedPoints = [...currentSession.points, newPoint];
+        
+        // Firestoreを更新
+        const sessionRef = doc(db, 'sessions', sessionId);
+        updateDoc(sessionRef, {
+          points: updatedPoints
+        });
 
-      setTrackingSession((prev) => 
-        prev ? { ...prev, points: updatedPoints } : null
-      );
+        console.log('updatedPoints', updatedPoints);
+        console.log('prev trackingSession', prev);
+        
+        return { ...currentSession, points: updatedPoints };
+      });
 
       pointCount++;
     }, 2000); // 2秒ごとに移動
@@ -343,10 +385,20 @@ export function MapView({ userId }: MapViewProps) {
           />
         )}
         
+        <ExploredAreaLayer 
+          exploredAreas={exploredAreas} 
+          isVisible={showExplorationLayer} 
+        />
+        
         <LocationUpdater position={currentPosition} />
       </MapContainer>
       
-      <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-[1000] flex flex-col items-center gap-4">
+      <ExplorationStatsComponent 
+        stats={explorationStats}
+        isVisible={showExplorationLayer}
+      />
+      
+      <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-[9999] flex flex-col items-center gap-3">
         <button
           onClick={isTracking ? stopTracking : startTracking}
           className={`px-6 py-3 rounded-full text-white font-semibold shadow-lg transition-all ${
@@ -358,14 +410,24 @@ export function MapView({ userId }: MapViewProps) {
           {isTracking ? '記録停止' : '記録開始'}
         </button>
         
-        {!isTracking && (
-          <button
-            onClick={startDemoMode}
-            className="px-4 py-2 rounded-full bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium shadow-lg transition-all"
-          >
-            デモモード（位置情報不要）
-          </button>
-        )}
+        <button
+          onClick={startDemoMode}
+          className="px-4 py-2 rounded-full bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium shadow-lg transition-all"
+          disabled={isTracking}
+        >
+          デモモード（位置情報不要）
+        </button>
+        
+        <button
+          onClick={() => setShowExplorationLayer(!showExplorationLayer)}
+          className={`px-4 py-2 rounded-full text-white text-sm font-medium shadow-lg transition-all ${
+            showExplorationLayer 
+              ? 'bg-green-500 hover:bg-green-600' 
+              : 'bg-gray-500 hover:bg-gray-600'
+          }`}
+        >
+          🗺️ {showExplorationLayer ? '探索表示ON' : '探索表示OFF'}
+        </button>
       </div>
     </div>
   );
