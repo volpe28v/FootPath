@@ -1,4 +1,3 @@
-import React from 'react';
 import type { ExplorationStats } from '../types/ExploredArea';
 import { formatArea } from '../utils/explorationUtils';
 
@@ -11,7 +10,7 @@ export function ExplorationStatsComponent({ stats, isVisible }: ExplorationStats
   if (!isVisible) return null;
 
   return (
-    <div className="absolute top-4 right-4 z-[1000] bg-black/80 text-white p-4 rounded-lg backdrop-blur-sm border border-green-500/30">
+    <div className="absolute top-4 left-4 z-[1000] bg-black/80 text-white p-4 rounded-lg backdrop-blur-sm border border-green-500/30">
       <div className="text-sm font-mono space-y-2">
         <div className="text-green-400 font-bold border-b border-green-500/30 pb-2 mb-2">
           🗺️ 探索データ

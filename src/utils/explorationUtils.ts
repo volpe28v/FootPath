@@ -15,7 +15,7 @@ export function calculateDistance(lat1: number, lng1: number, lat2: number, lng2
 }
 
 // 軌跡から探索済みエリアを生成
-export function generateExploredAreas(points: GeoPoint[], userId: string, explorationRadius: number = 50): ExploredArea[] {
+export function generateExploredAreas(points: GeoPoint[], userId: string, explorationRadius: number = 25): ExploredArea[] {
   console.log('generateExploredAreas called with:', { 
     pointsCount: points.length, 
     userId, 
