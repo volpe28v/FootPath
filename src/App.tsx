@@ -26,10 +26,12 @@ function App() {
   };
 
   const handleLogout = async () => {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error('ログアウトエラー:', error);
+    if (window.confirm('ログアウトしますか？')) {
+      try {
+        await signOut(auth);
+      } catch (error) {
+        console.error('ログアウトエラー:', error);
+      }
     }
   };
 
@@ -60,20 +62,18 @@ function App() {
 
   return (
     <div className="relative h-screen">
-      <div className="absolute top-4 right-4 z-[1000] bg-white rounded-lg shadow-md p-2 flex items-center space-x-3">
-        <div className="flex items-center space-x-2">
+      <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 1000 }}>
+        <button
+          onClick={handleLogout}
+          className="bg-white rounded-full shadow-md p-1 hover:shadow-lg transition-shadow"
+          title={user.displayName || 'ユーザー'}
+        >
           <img
             src={user.photoURL || ''}
             alt={user.displayName || ''}
-            className="w-8 h-8 rounded-full"
+            style={{ width: '40px', height: '40px' }}
+            className="rounded-full"
           />
-          <span className="text-sm font-medium">{user.displayName}</span>
-        </div>
-        <button
-          onClick={handleLogout}
-          className="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600 transition-colors"
-        >
-          ログアウト
         </button>
       </div>
       <MapView userId={user.uid} />

@@ -67,7 +67,6 @@ export function MapView({ userId }: MapViewProps) {
   const [currentPosition, setCurrentPosition] = useState<LatLngExpression | null>(null);
   const [isTracking, setIsTracking] = useState(false);
   const [trackingSession, setTrackingSession] = useState<TrackingSession | null>(null);
-  const [allPoints, setAllPoints] = useState<GeoPoint[]>([]);
   const [exploredAreas, setExploredAreas] = useState<ExploredArea[]>([]);
   const [historyExploredAreas, setHistoryExploredAreas] = useState<ExploredArea[]>([]);
   const [explorationStats, setExplorationStats] = useState<ExplorationStats>({
@@ -203,8 +202,6 @@ export function MapView({ userId }: MapViewProps) {
       console.log('Total sessions found:', sessions.length);
       console.log('Total points from all sessions:', points.length);
       console.log('Current userId:', userId);
-      
-      setAllPoints(points);
       
       // 全履歴ポイントから探索エリアを生成
       if (points.length > 0) {
@@ -448,7 +445,6 @@ export function MapView({ userId }: MapViewProps) {
     pendingPointsRef.current = [];
   };
 
-  const polylinePositions: LatLngExpression[] = allPoints.map(point => [point.lat, point.lng]);
   const currentTrackPositions: LatLngExpression[] = trackingSession 
     ? trackingSession.points.map(point => [point.lat, point.lng])
     : [];
@@ -564,14 +560,6 @@ export function MapView({ userId }: MapViewProps) {
           isVisible={showExplorationLayer} 
         />
         
-        {/* デバッグ情報表示 */}
-        <div className="absolute top-20 left-4 z-[1002] bg-black bg-opacity-70 text-white p-2 rounded text-xs">
-          履歴エリア: {historyExploredAreas.length}<br/>
-          現在エリア: {exploredAreas.length}<br/>
-          合計エリア: {historyExploredAreas.length + exploredAreas.length}<br/>
-          全ポイント: {allPoints.length}<br/>
-          ユーザーID: {userId}
-        </div>
         
         <LocationUpdater position={currentPosition} />
       </MapContainer>
