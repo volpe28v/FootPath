@@ -7,8 +7,10 @@ import { db } from '../firebase';
 import type { GeoPoint, TrackingSession } from '../types/GeoPoint';
 import type { ExploredArea, ExplorationStats } from '../types/ExploredArea';
 import { ExploredAreaLayer } from './ExploredAreaLayer';
-import { ExplorationStatsComponent } from './ExplorationStats';
 import { generateExploredAreas, calculateExplorationStats, calculateDistance } from '../utils/explorationUtils';
+import { DailyStatsPanel } from './DailyStatsPanel';
+import { calculateDailyStats } from '../utils/dailyStats';
+import type { DailyStats } from '../utils/dailyStats';
 import 'leaflet/dist/leaflet.css';
 
 // Leafletのデフォルトマーカーアイコンを修正
@@ -76,6 +78,9 @@ export function MapView({ userId }: MapViewProps) {
     explorationPercentage: 0
   });
   const [showExplorationLayer, setShowExplorationLayer] = useState(true);
+  const [dailyStats, setDailyStats] = useState<DailyStats[]>([]);
+  const [showDailyStats, setShowDailyStats] = useState(false);
+  const dailyStatsRef = useRef<HTMLDivElement>(null);
   const watchIdRef = useRef<number | null>(null);
   const batchIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastPositionRef = useRef<{lat: number, lng: number, timestamp: number} | null>(null);
@@ -356,6 +361,10 @@ export function MapView({ userId }: MapViewProps) {
         console.log('No historical points found - setting empty arrays');
         setHistoryExploredAreas([]);
       }
+      
+      // 日別統計を計算
+      const stats = calculateDailyStats(sessions);
+      setDailyStats(stats);
     });
 
     return () => {
@@ -363,6 +372,23 @@ export function MapView({ userId }: MapViewProps) {
       userUnsubscribe();
     };
   }, [userId]);
+
+  // 外側クリックでプルダウンを閉じる
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dailyStatsRef.current && !dailyStatsRef.current.contains(event.target as Node)) {
+        setShowDailyStats(false);
+      }
+    };
+
+    if (showDailyStats) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showDailyStats]);
 
   useEffect(() => {
     // デバッグ情報の出力
@@ -747,12 +773,69 @@ export function MapView({ userId }: MapViewProps) {
   };
 
   return (
-    <div className="relative h-screen w-full">
-      <MapContainer
-        center={currentPosition || [35.6762, 139.6503]}
-        zoom={17}
-        className="h-full w-full"
-      >
+    <div className="relative h-screen w-full flex flex-col">
+      {/* ヘッダー部分 */}
+      <div className="bg-white shadow-lg p-4 z-[1002] flex items-center gap-4">
+        {/* 左側：コントロールボタン */}
+        <div className="flex items-center gap-3">
+          {/* 記録開始/停止ボタン */}
+          <button
+            onClick={isTracking ? stopTracking : startTracking}
+            className={`px-4 py-2 rounded-lg text-white font-semibold shadow-md transition-all ${
+              isTracking 
+                ? 'bg-red-500 hover:bg-red-600' 
+                : 'bg-blue-500 hover:bg-blue-600'
+            }`}
+          >
+            {isTracking ? '📍 記録停止' : '📍 記録開始'}
+          </button>
+          
+          {/* デモモードボタン */}
+          <button
+            onClick={startDemoMode}
+            className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg font-medium shadow-md transition-all"
+            disabled={isTracking}
+          >
+            🎮 デモモード
+          </button>
+          
+          {/* 日別統計ボタン */}
+          <div className="relative" ref={dailyStatsRef}>
+            <button
+              onClick={() => setShowDailyStats(!showDailyStats)}
+              className="bg-gray-100 hover:bg-gray-200 text-gray-800 px-4 py-2 rounded-lg font-medium shadow-md transition-all flex items-center gap-2 whitespace-nowrap"
+            >
+              📊 日別統計
+              <svg 
+                className={`w-4 h-4 transition-transform ${showDailyStats ? 'rotate-180' : ''}`}
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            
+            {/* プルダウンメニュー */}
+            {showDailyStats && (
+              <div className="absolute left-0 top-full mt-2 bg-white rounded-lg shadow-lg border border-gray-200 z-[1003] min-w-[300px]">
+                <DailyStatsPanel 
+                  dailyStats={dailyStats}
+                  isLoading={false}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 地図部分 */}
+      <div className="flex-1">
+        <MapContainer
+          center={currentPosition || [35.6762, 139.6503]}
+          zoom={17}
+          className="h-full w-full"
+        >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -781,46 +864,6 @@ export function MapView({ userId }: MapViewProps) {
         <LocationUpdater position={currentPosition} />
       </MapContainer>
       
-      {/* 探索統計パネル - 左上 */}
-      <ExplorationStatsComponent 
-        stats={explorationStats}
-        isVisible={showExplorationLayer}
-      />
-      
-      {/* コントロールボタン群 - 下部に横並び配置 */}
-      <div className="absolute bottom-4 left-4 right-4 z-[1001] flex justify-between items-center gap-4">
-        {/* 記録開始/停止ボタン - 左 */}
-        <button
-          onClick={isTracking ? stopTracking : startTracking}
-          className={`px-6 py-3 rounded-lg text-white font-semibold shadow-lg transition-all ${
-            isTracking 
-              ? 'bg-red-500 hover:bg-red-600' 
-              : 'bg-blue-500 hover:bg-blue-600'
-          }`}
-        >
-          {isTracking ? '📍 記録停止' : '📍 記録開始'}
-        </button>
-        
-        {/* デモモードボタン - 中央 */}
-        <button
-          onClick={startDemoMode}
-          className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-lg transition-all"
-          disabled={isTracking}
-        >
-          🎮 デモモード
-        </button>
-        
-        {/* 探索表示切替ボタン - 右 */}
-        <button
-          onClick={() => setShowExplorationLayer(!showExplorationLayer)}
-          className={`px-4 py-2 rounded-lg text-white text-sm font-medium shadow-lg transition-all ${
-            showExplorationLayer 
-              ? 'bg-green-500 hover:bg-green-600' 
-              : 'bg-gray-500 hover:bg-gray-600'
-          }`}
-        >
-          🗺️ {showExplorationLayer ? '探索表示ON' : '探索表示OFF'}
-        </button>
       </div>
     </div>
   );

@@ -62,16 +62,17 @@ function App() {
 
   return (
     <div className="relative h-screen">
-      <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 1000 }}>
+      <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 1003 }}>
         <button
           onClick={handleLogout}
-          className="bg-white rounded-full shadow-md p-1 hover:shadow-lg transition-shadow"
+          className="bg-white rounded-full shadow-md p-1 hover:shadow-lg transition-shadow cursor-pointer"
           title={user.displayName || 'ユーザー'}
+          style={{ pointerEvents: 'auto' }}
         >
           <img
             src={user.photoURL || ''}
             alt={user.displayName || ''}
-            style={{ width: '40px', height: '40px' }}
+            style={{ width: '40px', height: '40px', pointerEvents: 'none' }}
             className="rounded-full"
           />
         </button>
