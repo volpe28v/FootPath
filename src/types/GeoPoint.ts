@@ -11,4 +11,6 @@ export interface TrackingSession {
   startTime: Date;
   endTime?: Date;
   isActive: boolean;
+  storageMode?: 'full' | 'areas_only'; // 保存モード
+  minDistance?: number; // 最小記録距離（メートル）
 }

@@ -78,8 +78,9 @@ export function MapView({ userId }: MapViewProps) {
   const [showExplorationLayer, setShowExplorationLayer] = useState(true);
   const watchIdRef = useRef<number | null>(null);
   const batchIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const lastPositionRef = useRef<{lat: number, lng: number} | null>(null);
+  const lastPositionRef = useRef<{lat: number, lng: number, timestamp: number} | null>(null);
   const pendingPointsRef = useRef<GeoPoint[]>([]);
+  const recentPositionsRef = useRef<Array<{lat: number, lng: number, timestamp: number, accuracy: number}>>([]);
 
   // バッチ処理でFirestoreに送信
   const flushPendingPoints = async (sessionId: string) => {
@@ -90,17 +91,33 @@ export function MapView({ userId }: MapViewProps) {
       const pointsToUpload = [...pendingPointsRef.current];
       setTrackingSession((prev) => {
         if (!prev) return null;
-        const updatedPoints = [...prev.points, ...pointsToUpload];
+        let updatedPoints = [...prev.points, ...pointsToUpload];
         
-        console.log(`Batch upload: ${pointsToUpload.length} points`);
+        // 軌跡が長くなりすぎた場合は間引き処理
+        if (updatedPoints.length > optimizationSettings.maxPoints) {
+          console.log(`Track getting too long (${updatedPoints.length}), simplifying to ${optimizationSettings.maxPoints}...`);
+          updatedPoints = simplifyTrack(updatedPoints, optimizationSettings.maxPoints);
+        }
+        
+        console.log(`Batch upload: ${pointsToUpload.length} points, total: ${updatedPoints.length}`);
         
         return { ...prev, points: updatedPoints };
       });
       
-      // Firestoreを更新
+      // 間引き後のデータをFirestoreに保存
+      const currentPoints = trackingSession?.points || [];
+      let allPoints = [...currentPoints, ...pointsToUpload];
+      
+      // Firestore保存前にも間引き処理
+      if (allPoints.length > optimizationSettings.maxPoints) {
+        allPoints = simplifyTrack(allPoints, optimizationSettings.maxPoints);
+      }
+      
       const sessionRef = doc(db, 'sessions', sessionId);
       await updateDoc(sessionRef, {
-        points: [...(trackingSession?.points || []), ...pointsToUpload]
+        points: allPoints,
+        storageMode: 'full',
+        minDistance: optimizationSettings.minDistance
       });
       
       // 成功後にクリア
@@ -108,6 +125,124 @@ export function MapView({ userId }: MapViewProps) {
     } catch (error) {
       console.error('Batch upload error:', error);
     }
+  };
+
+  // 位置情報の平滑化（最近の5つの位置の重み付け平均）
+  const smoothPosition = (newPosition: {lat: number, lng: number, accuracy: number}): {lat: number, lng: number} => {
+    const maxHistory = 5;
+    const now = Date.now();
+    
+    // 30秒以上古いデータを除去
+    recentPositionsRef.current = recentPositionsRef.current.filter(
+      pos => (now - pos.timestamp) < 30000
+    );
+    
+    // 新しい位置を追加
+    recentPositionsRef.current.push({
+      ...newPosition,
+      timestamp: now
+    });
+    
+    // 履歴を制限
+    if (recentPositionsRef.current.length > maxHistory) {
+      recentPositionsRef.current = recentPositionsRef.current.slice(-maxHistory);
+    }
+    
+    // 精度に基づく重み付け平均を計算
+    let totalWeight = 0;
+    let weightedLat = 0;
+    let weightedLng = 0;
+    
+    recentPositionsRef.current.forEach(pos => {
+      // 精度が良いほど重みを大きく（accuracyの逆数）
+      const weight = 1 / Math.max(pos.accuracy, 5); // 最小5mとして除算エラーを防ぐ
+      weightedLat += pos.lat * weight;
+      weightedLng += pos.lng * weight;
+      totalWeight += weight;
+    });
+    
+    if (totalWeight === 0) return newPosition;
+    
+    const smoothedPosition = {
+      lat: weightedLat / totalWeight,
+      lng: weightedLng / totalWeight
+    };
+    
+    console.log(`Position smoothed: accuracy ${newPosition.accuracy}m, history: ${recentPositionsRef.current.length} points`);
+    
+    return smoothedPosition;
+  };
+
+  // 位置情報の妥当性チェック
+  const validatePosition = (position: GeolocationPosition): boolean => {
+    const { accuracy, latitude, longitude } = position.coords;
+    const now = Date.now();
+    
+    // 1. 精度フィルタリング（100m以上の誤差は除外）
+    if (accuracy > 100) {
+      console.log(`Position rejected - poor accuracy: ${accuracy}m`);
+      return false;
+    }
+    
+    // 2. 緯度経度の妥当性チェック
+    if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) {
+      console.log('Position rejected - invalid coordinates');
+      return false;
+    }
+    
+    // 3. 移動速度チェック（前の位置がある場合）
+    if (lastPositionRef.current) {
+      const distance = calculateDistance(
+        lastPositionRef.current.lat,
+        lastPositionRef.current.lng,
+        latitude,
+        longitude
+      );
+      
+      const timeDiff = (now - (lastPositionRef.current.timestamp || 0)) / 1000; // 秒
+      const speed = distance / timeDiff; // m/s
+      const speedKmh = speed * 3.6; // km/h
+      
+      // 人間の歩行速度（時速20km以下に制限）
+      if (speedKmh > 20) {
+        console.log(`Position rejected - unrealistic speed: ${speedKmh.toFixed(1)} km/h`);
+        return false;
+      }
+      
+      console.log(`Speed check passed: ${speedKmh.toFixed(1)} km/h`);
+    }
+    
+    return true;
+  };
+
+  // 軌跡データの間引き処理
+  const simplifyTrack = (points: GeoPoint[], maxPoints: number = 500): GeoPoint[] => {
+    if (points.length <= maxPoints) return points;
+    
+    // 最新の重要なポイントを保持
+    const interval = Math.floor(points.length / maxPoints);
+    const simplified: GeoPoint[] = [];
+    
+    // 最初と最後のポイントは必ず保持
+    simplified.push(points[0]);
+    
+    // 一定間隔でポイントを選択
+    for (let i = interval; i < points.length - interval; i += interval) {
+      simplified.push(points[i]);
+    }
+    
+    // 最後のポイントを保持
+    simplified.push(points[points.length - 1]);
+    
+    console.log(`Track simplified: ${points.length} -> ${simplified.length} points`);
+    return simplified;
+  };
+
+  // 最適化設定（固定）
+  const optimizationSettings = {
+    minDistance: 25,    // 25m間隔で記録
+    maxPoints: 1000,    // 最大1000ポイント保持
+    batchInterval: 60000 // 60秒間隔でバッチ保存
   };
 
   // 距離ベースの位置更新判定
@@ -124,8 +259,8 @@ export function MapView({ userId }: MapViewProps) {
       newLng
     );
     
-    console.log(`Distance moved: ${distance.toFixed(2)}m (threshold: 25m)`);
-    return distance >= 25; // 25m以上移動した場合のみ更新
+    console.log(`Distance moved: ${distance.toFixed(2)}m (threshold: ${optimizationSettings.minDistance}m)`);
+    return distance >= optimizationSettings.minDistance;
   };
 
   // 現在のトラッキングセッションの軌跡から探索エリアを更新
@@ -273,8 +408,23 @@ export function MapView({ userId }: MapViewProps) {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
+          // 初期位置取得時もバリデーション
+          if (!validatePosition(position)) {
+            console.log('Initial position rejected - using default location');
+            const tokyoStation: LatLngExpression = [35.6812, 139.7671];
+            setCurrentPosition(tokyoStation);
+            return;
+          }
+
           const pos: LatLngExpression = [position.coords.latitude, position.coords.longitude];
           setCurrentPosition(pos);
+          lastPositionRef.current = { 
+            lat: position.coords.latitude, 
+            lng: position.coords.longitude, 
+            timestamp: Date.now() 
+          };
+          
+          console.log(`Initial position set with accuracy: ${position.coords.accuracy}m`);
           
           // 位置情報取得成功時、自動的に記録を開始
           if (!isTracking) {
@@ -344,7 +494,9 @@ export function MapView({ userId }: MapViewProps) {
       userId,
       points: [],
       startTime: new Date(),
-      isActive: true
+      isActive: true,
+      storageMode: 'full',
+      minDistance: optimizationSettings.minDistance
     };
 
     const docRef = await addDoc(collection(db, 'sessions'), newSession);
@@ -355,12 +507,26 @@ export function MapView({ userId }: MapViewProps) {
     // バッチ処理タイマー開始（60秒間隔）
     batchIntervalRef.current = setInterval(() => {
       flushPendingPoints(sessionId);
-    }, 60000);
+    }, optimizationSettings.batchInterval);
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       (position) => {
-        const newLat = position.coords.latitude;
-        const newLng = position.coords.longitude;
+        // 位置情報の妥当性チェック
+        if (!validatePosition(position)) {
+          console.log('Position update rejected - validation failed');
+          return;
+        }
+
+        // 位置情報を平滑化
+        const smoothedPos = smoothPosition({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: position.coords.accuracy
+        });
+        
+        const newLat = smoothedPos.lat;
+        const newLng = smoothedPos.lng;
+        const now = Date.now();
         
         // 距離ベースフィルタリング
         if (!shouldUpdatePosition(newLat, newLng)) {
@@ -376,11 +542,11 @@ export function MapView({ userId }: MapViewProps) {
 
         // 現在位置更新（UI用）
         setCurrentPosition([newLat, newLng]);
-        lastPositionRef.current = { lat: newLat, lng: newLng };
+        lastPositionRef.current = { lat: newLat, lng: newLng, timestamp: now };
 
         // ペンディングキューに追加（Firestore更新は後でバッチ処理）
         pendingPointsRef.current.push(newPoint);
-        console.log(`Point queued. Pending: ${pendingPointsRef.current.length}`);
+        console.log(`Point queued. Pending: ${pendingPointsRef.current.length}, Accuracy: ${position.coords.accuracy}m`);
 
         // ローカル状態は即座に更新（UI反応性維持）
         setTrackingSession((prev) => {
@@ -447,13 +613,14 @@ export function MapView({ userId }: MapViewProps) {
     setTrackingSession(null);
     lastPositionRef.current = null;
     pendingPointsRef.current = [];
+    recentPositionsRef.current = [];
   };
 
   const currentTrackPositions: LatLngExpression[] = trackingSession 
     ? trackingSession.points.map(point => [point.lat, point.lng])
     : [];
 
-  // デモモード用の関数
+  // デモモード用の関数 - より現実的な散策シミュレーション
   const startDemoMode = async () => {
     if (!currentPosition) {
       alert('位置情報を設定してください');
@@ -466,7 +633,9 @@ export function MapView({ userId }: MapViewProps) {
       userId,
       points: [],
       startTime: new Date(),
-      isActive: true
+      isActive: true,
+      storageMode: 'full',
+      minDistance: optimizationSettings.minDistance
     };
 
     const docRef = await addDoc(collection(db, 'sessions'), newSession);
@@ -474,36 +643,81 @@ export function MapView({ userId }: MapViewProps) {
     
     setTrackingSession({ ...newSession, id: sessionId });
 
-    // デモ用の移動シミュレーション
+    // デモ用の移動シミュレーション状態
     let lat = Array.isArray(currentPosition) ? currentPosition[0] as number : 35.6812;
     let lng = Array.isArray(currentPosition) ? currentPosition[1] as number : 139.7671;
-    let pointCount = 0;
+    
+    // 散策の状態
+    let direction = Math.random() * Math.PI * 2; // 初期方向（ラジアン）
+    let speed = 1.2; // 歩行速度 (m/s) - 時速約4.3km
+    let isResting = false;
+    let restTimer = 0;
+    let walkDuration = 0;
+    let turnTendency = (Math.random() - 0.5) * 0.3; // 左右への曲がり癖
 
     // バッチ処理タイマー開始（60秒間隔）
     batchIntervalRef.current = setInterval(() => {
       flushPendingPoints(sessionId);
-    }, 60000);
+    }, optimizationSettings.batchInterval);
 
     const demoInterval = setInterval(() => {
-      if (pointCount >= 20) { // より多くのポイントでテスト
-        clearInterval(demoInterval);
+      walkDuration++;
+      
+      // 休憩の処理
+      if (isResting) {
+        restTimer--;
+        if (restTimer <= 0) {
+          isResting = false;
+          console.log('Demo: 休憩終了、散策再開');
+        }
         return;
       }
-
-      // デモ用により大きな移動（確実に50m以上移動するように）
-      lat += (Math.random() - 0.5) * 0.003; // さらに大きな移動距離
-      lng += (Math.random() - 0.5) * 0.003;
-
-      // デモモードでは距離フィルターを緩和
-      const demoDistance = lastPositionRef.current ? 
-        calculateDistance(lastPositionRef.current.lat, lastPositionRef.current.lng, lat, lng) : 0;
       
-      console.log(`Demo movement distance: ${demoDistance.toFixed(2)}m`);
+      // 10-30分ごとにランダムに休憩（1-3分）
+      if (walkDuration > 0 && walkDuration % (600 + Math.floor(Math.random() * 1200)) === 0) {
+        isResting = true;
+        restTimer = 60 + Math.floor(Math.random() * 120); // 1-3分休憩
+        console.log(`Demo: 休憩開始（${restTimer}秒）`);
+        return;
+      }
       
-      // デモモードでは10m以上で更新（通常は25m）
-      if (lastPositionRef.current && demoDistance < 10) {
-        console.log('Demo: Position update skipped - insufficient movement');
-        pointCount++; // カウンターは進める
+      // 歩行速度の変化（0.8-1.5 m/s）
+      speed = 0.8 + Math.random() * 0.7;
+      
+      // 方向の自然な変化
+      direction += (Math.random() - 0.5) * 0.15 + turnTendency; // 基本的な揺らぎ + 曲がり癖
+      
+      // たまに大きく方向転換（交差点など）
+      if (Math.random() < 0.05) {
+        direction += (Math.random() - 0.5) * Math.PI / 2; // 最大90度の方向転換
+        console.log('Demo: 交差点で方向転換');
+      }
+      
+      // 移動距離の計算（1秒あたり）
+      const distanceMeters = speed;
+      
+      // 緯度経度への変換（おおよその計算）
+      const metersPerDegLat = 111000; // 緯度1度あたり約111km
+      const metersPerDegLng = 111000 * Math.cos(lat * Math.PI / 180); // 経度は緯度により変化
+      
+      const deltaLat = (distanceMeters * Math.cos(direction)) / metersPerDegLat;
+      const deltaLng = (distanceMeters * Math.sin(direction)) / metersPerDegLng;
+      
+      lat += deltaLat;
+      lng += deltaLng;
+      
+      // 境界チェック（日本の範囲内に制限）
+      if (lat < 20 || lat > 46 || lng < 122 || lng > 154) {
+        direction += Math.PI; // 180度回転
+        console.log('Demo: 境界に到達、反転');
+      }
+
+      // 現在位置を常に更新（UI表示用）
+      setCurrentPosition([lat, lng]);
+      
+      // 距離ベースフィルタリング（デモモードでも適用）
+      if (!shouldUpdatePosition(lat, lng)) {
+        // 位置は更新するが、記録はスキップ
         return;
       }
 
@@ -513,24 +727,23 @@ export function MapView({ userId }: MapViewProps) {
         timestamp: new Date()
       };
 
-      setCurrentPosition([newPoint.lat, newPoint.lng]);
-      lastPositionRef.current = { lat, lng };
+      lastPositionRef.current = { lat, lng, timestamp: Date.now() };
 
       // ペンディングキューに追加
       pendingPointsRef.current.push(newPoint);
-      console.log(`Demo point queued. Pending: ${pendingPointsRef.current.length}`);
+      console.log(`Demo: 記録 - 速度: ${(speed * 3.6).toFixed(1)}km/h, 方向: ${(direction * 180 / Math.PI).toFixed(0)}°`);
 
       // ローカル状態は即座に更新
       setTrackingSession((prev) => {
         const currentSession = prev || { points: [], id: sessionId, userId, startTime: new Date(), isActive: true };
         return { ...currentSession, points: [...currentSession.points, newPoint] };
       });
-
-      pointCount++;
-    }, 5000); // 5秒ごとに移動（頻度を下げる）
+    }, 1000); // 1秒ごとに更新（現実的な更新頻度）
 
     // インターバルIDを保存
     watchIdRef.current = demoInterval as any; // デモモード用に再利用
+    
+    console.log('Demo: 散策シミュレーション開始 - 無限に続きます（停止ボタンで終了）');
   };
 
   return (
