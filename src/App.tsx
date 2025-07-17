@@ -20,8 +20,8 @@ function App() {
   const handleLogin = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
-    } catch (error) {
-      console.error('ログインエラー:', error);
+    } catch {
+      // ログインエラー
     }
   };
 
@@ -29,8 +29,8 @@ function App() {
     if (window.confirm('ログアウトしますか？')) {
       try {
         await signOut(auth);
-      } catch (error) {
-        console.error('ログアウトエラー:', error);
+      } catch {
+        // ログアウトエラー
       }
     }
   };

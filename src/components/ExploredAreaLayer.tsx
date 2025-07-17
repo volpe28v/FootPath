@@ -7,28 +7,21 @@ interface ExploredAreaLayerProps {
 }
 
 export function ExploredAreaLayer({ exploredAreas, isVisible }: ExploredAreaLayerProps) {
-  console.log('ExploredAreaLayer render:', { 
-    isVisible, 
-    areasCount: exploredAreas.length, 
-    firstArea: exploredAreas[0],
-    allAreas: exploredAreas
-  });
-  
   if (!isVisible) return null;
 
   return (
     <>
       {exploredAreas.map((area, index) => {
         // timestampの型を安全に処理
-        const getTimestamp = (timestamp: any): number => {
-          if (timestamp && typeof timestamp.getTime === 'function') {
-            return timestamp.getTime();
-          } else if (timestamp && typeof timestamp.toDate === 'function') {
+        const getTimestamp = (timestamp: unknown): number => {
+          if (timestamp && typeof (timestamp as { getTime?: () => number }).getTime === 'function') {
+            return (timestamp as { getTime: () => number }).getTime();
+          } else if (timestamp && typeof (timestamp as { toDate?: () => Date }).toDate === 'function') {
             // Firestore Timestamp
-            return timestamp.toDate().getTime();
-          } else if (timestamp && typeof timestamp.seconds === 'number') {
+            return (timestamp as { toDate: () => Date }).toDate().getTime();
+          } else if (timestamp && typeof (timestamp as { seconds?: number }).seconds === 'number') {
             // Firestore Timestamp object
-            return timestamp.seconds * 1000;
+            return (timestamp as { seconds: number }).seconds * 1000;
           }
           return Date.now();
         };

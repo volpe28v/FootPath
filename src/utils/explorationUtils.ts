@@ -16,25 +16,15 @@ export function calculateDistance(lat1: number, lng1: number, lat2: number, lng2
 
 // 軌跡から探索済みエリアを生成
 export function generateExploredAreas(points: GeoPoint[], userId: string, explorationRadius: number = 25): ExploredArea[] {
-  console.log('generateExploredAreas called with:', { 
-    pointsCount: points.length, 
-    userId, 
-    explorationRadius,
-    firstPoint: points[0]
-  });
-  
   const areas: ExploredArea[] = [];
   const minDistance = explorationRadius * 0.3; // より小さな最小距離（15m）
 
-  points.forEach((point, index) => {
+  points.forEach((point) => {
     // 既存のエリアと重複していないかチェック
     const hasNearbyArea = areas.some(area => {
       const distance = calculateDistance(area.lat, area.lng, point.lat, point.lng);
-      console.log(`Distance from point ${index} to existing area:`, distance, 'minDistance:', minDistance);
       return distance < minDistance;
     });
-
-    console.log(`Point ${index}:`, point, 'hasNearbyArea:', hasNearbyArea);
 
     if (!hasNearbyArea) {
       const newArea = {
@@ -45,13 +35,9 @@ export function generateExploredAreas(points: GeoPoint[], userId: string, explor
         userId
       };
       areas.push(newArea);
-      console.log('Added new area:', newArea);
-    } else {
-      console.log(`Skipped point ${index} due to nearby area`);
     }
   });
 
-  console.log('Final generated areas:', areas.length, areas);
   return areas;
 }
 
