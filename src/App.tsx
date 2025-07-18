@@ -37,23 +37,44 @@ function App() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-100">
-        <div className="text-lg">読み込み中...</div>
+      <div className="flex items-center justify-center h-screen bg-slate-900">
+        <div className="text-lg text-cyan-400 font-mono">LOADING...</div>
       </div>
     );
   }
 
   if (!user) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-br from-blue-500 to-purple-600 text-white">
-        <div className="text-center">
-          <h1 className="text-4xl font-bold mb-8">Footpath</h1>
-          <p className="text-xl mb-8">あなたの歩いた道を地図で記録</p>
+      <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white relative overflow-hidden">
+        {/* グリッド背景 */}
+        <div className="absolute inset-0 opacity-20" 
+             style={{
+               backgroundImage: `
+                 linear-gradient(rgba(34, 197, 94, 0.2) 1px, transparent 1px),
+                 linear-gradient(90deg, rgba(34, 197, 94, 0.2) 1px, transparent 1px)
+               `,
+               backgroundSize: '40px 40px'
+             }}>
+        </div>
+        
+        <div className="text-center relative z-10">
+          <h1 className="text-6xl font-bold mb-4 font-mono bg-gradient-to-r from-cyan-400 to-emerald-400 bg-clip-text text-transparent">
+            FOOTPATH
+          </h1>
+          <div className="text-emerald-400 text-lg font-mono mb-8 tracking-wider">
+            &gt; GPS TRACKING SYSTEM
+          </div>
+          <p className="text-slate-300 text-lg mb-12 font-mono">
+            位置情報を記録・可視化するシステム
+          </p>
           <button
             onClick={handleLogin}
-            className="bg-white text-blue-600 px-8 py-3 rounded-full font-semibold hover:bg-gray-100 transition-colors shadow-lg"
+            className="relative px-8 py-4 rounded-xl font-mono font-bold text-sm uppercase tracking-wider bg-gradient-to-r from-cyan-600 to-emerald-600 text-white hover:from-cyan-500 hover:to-emerald-500 transition-all duration-300 transform hover:scale-105 shadow-lg shadow-cyan-500/25 hover:shadow-cyan-500/50 before:absolute before:inset-0 before:rounded-xl before:bg-gradient-to-r before:from-cyan-400 before:to-emerald-400 before:opacity-0 hover:before:opacity-20 before:transition-opacity"
           >
-            Googleでログイン
+            <span className="relative z-10 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-cyan-300"></span>
+              GOOGLE LOGIN
+            </span>
           </button>
         </div>
       </div>
@@ -65,7 +86,7 @@ function App() {
       <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 1003 }}>
         <button
           onClick={handleLogout}
-          className="bg-white rounded-full shadow-md p-1 hover:shadow-lg transition-shadow cursor-pointer"
+          className="bg-slate-800 border border-slate-600 rounded-full shadow-lg p-1 hover:shadow-xl hover:border-cyan-400 transition-all duration-300 cursor-pointer transform hover:scale-105"
           title={user.displayName || 'ユーザー'}
           style={{ pointerEvents: 'auto' }}
         >

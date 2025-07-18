@@ -810,42 +810,68 @@ export function MapView({ userId }: MapViewProps) {
   };
 
   return (
-    <div className="relative h-screen w-full flex flex-col">
+    <div className="relative h-screen w-full flex flex-col bg-slate-900">
       {/* ヘッダー部分 */}
-      <div className="bg-white shadow-lg p-4 z-[1002] flex items-center gap-4">
+      <div className="bg-gradient-to-r from-slate-800 to-slate-900 border-b border-slate-700 p-4 z-[1002] flex items-center gap-4 shadow-2xl">
         {/* 左側：コントロールボタン */}
         <div className="flex items-center gap-3">
           {/* 記録開始/停止ボタン */}
           <button
             onClick={isTracking ? stopTracking : startTracking}
-            className={`px-4 py-2 rounded-lg text-white font-semibold shadow-md transition-all ${
+            className={`relative px-6 py-3 rounded-xl font-mono font-bold text-sm uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg ${
               isTracking 
-                ? 'bg-red-500 hover:bg-red-600' 
-                : 'bg-blue-500 hover:bg-blue-600'
-            }`}
+                ? 'bg-gradient-to-r from-red-600 to-red-700 text-white hover:from-red-500 hover:to-red-600 shadow-red-500/25 hover:shadow-red-500/50' 
+                : 'bg-gradient-to-r from-emerald-600 to-emerald-700 text-white hover:from-emerald-500 hover:to-emerald-600 shadow-emerald-500/25 hover:shadow-emerald-500/50'
+            } before:absolute before:inset-0 before:rounded-xl before:bg-gradient-to-r ${
+              isTracking 
+                ? 'before:from-red-400 before:to-red-500' 
+                : 'before:from-emerald-400 before:to-emerald-500'
+            } before:opacity-0 hover:before:opacity-20 before:transition-opacity`}
           >
-            {isTracking ? '📍 記録停止' : '📍 記録開始'}
+            <span className="relative z-10 flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${isTracking ? 'bg-red-300 animate-pulse' : 'bg-emerald-300'}`}></span>
+              {isTracking ? 'STOP REC' : 'START REC'}
+            </span>
           </button>
           
           {/* デモモードボタン */}
           <button
             onClick={startDemoMode}
-            className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg font-medium shadow-md transition-all"
+            className="relative px-6 py-3 rounded-xl font-mono font-bold text-sm uppercase tracking-wider bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-500 hover:to-indigo-500 transition-all duration-300 transform hover:scale-105 shadow-lg shadow-purple-500/25 hover:shadow-purple-500/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 before:absolute before:inset-0 before:rounded-xl before:bg-gradient-to-r before:from-purple-400 before:to-indigo-400 before:opacity-0 hover:before:opacity-20 before:transition-opacity"
             disabled={isTracking}
           >
-            🎮 デモモード
+            <span className="relative z-10 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-purple-300"></span>
+              DEMO MODE
+            </span>
           </button>
           
           {/* データ数表示 */}
-          <div className="bg-gray-100 text-gray-800 px-4 py-2 rounded-lg font-medium shadow-md">
-            📊 {totalPointsCount + (trackingSession?.points?.length || 0) - pendingCount}:{pendingCount}
+          <div className="relative px-6 py-3 rounded-xl font-mono font-bold text-lg bg-slate-800 text-cyan-400 border border-slate-600 shadow-lg">
+            <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 rounded-xl"></div>
+            <div className="relative z-10 flex items-center gap-2">
+              <span className="text-white">{totalPointsCount + (trackingSession?.points?.length || 0) - pendingCount}</span>
+              <span className="text-slate-400">:</span>
+              <span className="text-yellow-400">{pendingCount}</span>
+            </div>
           </div>
           
         </div>
       </div>
 
       {/* 地図部分 */}
-      <div className="flex-1">
+      <div className="flex-1 relative">
+        {/* グリッド背景効果 */}
+        <div className="absolute inset-0 bg-slate-900 opacity-20 z-[1000] pointer-events-none" 
+             style={{
+               backgroundImage: `
+                 linear-gradient(rgba(34, 197, 94, 0.1) 1px, transparent 1px),
+                 linear-gradient(90deg, rgba(34, 197, 94, 0.1) 1px, transparent 1px)
+               `,
+               backgroundSize: '20px 20px'
+             }}>
+        </div>
+        
         <MapContainer
           center={currentPosition || [35.6762, 139.6503]}
           zoom={17}
@@ -854,7 +880,7 @@ export function MapView({ userId }: MapViewProps) {
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          opacity={0.4}
+          opacity={0.6}
         />
         
         {currentPosition && (
@@ -865,8 +891,10 @@ export function MapView({ userId }: MapViewProps) {
         {currentTrackPositions.length > 0 && (
           <Polyline 
             positions={currentTrackPositions} 
-            color="red" 
-            weight={4}
+            color="#10b981" 
+            weight={6}
+            opacity={0.8}
+            dashArray="5, 10"
           />
         )}
         
