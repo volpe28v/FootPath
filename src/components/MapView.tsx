@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Polyline, Marker, useMap } from 'react-leaflet';
 import type { LatLngExpression } from 'leaflet';
 import L from 'leaflet';
-import { collection, addDoc, query, where, onSnapshot, updateDoc, doc, arrayUnion } from 'firebase/firestore';
+import { collection, addDoc, query, where, onSnapshot, updateDoc, doc, arrayUnion, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { GeoPoint, TrackingSession } from '../types/GeoPoint';
 import type { ExploredArea, ExplorationStats } from '../types/ExploredArea';
@@ -81,6 +81,7 @@ export function MapView({ userId }: MapViewProps) {
   const batchIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastPositionRef = useRef<{lat: number, lng: number, timestamp: number} | null>(null);
   const pendingPointsRef = useRef<GeoPoint[]>([]);
+  const autoStartRef = useRef<boolean>(false);
 
   // バッチ処理でFirestoreに送信（増分保存）
   const flushPendingPoints = async (sessionId: string) => {
@@ -178,6 +179,239 @@ export function MapView({ userId }: MapViewProps) {
       setExploredAreas(newExploredAreas);
     }
   }, [trackingSession?.points?.length, userId, trackingSession]);
+
+  // 起動時の孤立セッションクリーンアップ
+  useEffect(() => {
+    const cleanupOrphanedSessions = async () => {
+      try {
+        const activeSessionsQuery = query(
+          collection(db, 'sessions'),
+          where('userId', '==', userId),
+          where('isActive', '==', true)
+        );
+        
+        const snapshot = await getDocs(activeSessionsQuery);
+        
+        if (snapshot.empty) return;
+        
+        const now = new Date();
+        const autoResumeSessions: TrackingSession[] = [];
+        const expiredSessions: TrackingSession[] = [];
+        
+        snapshot.docs.forEach((docSnapshot: any) => {
+          const session = { ...docSnapshot.data(), id: docSnapshot.id } as TrackingSession;
+          const startTime = session.startTime instanceof Date 
+            ? session.startTime 
+            : (session.startTime as any).toDate();
+          
+          const minutesDiff = (now.getTime() - startTime.getTime()) / (1000 * 60);
+          
+          if (minutesDiff > 10) {
+            // 10分以上経過したセッションは強制終了
+            expiredSessions.push(session);
+          } else {
+            // 10分以内のセッションは自動継続
+            autoResumeSessions.push(session);
+          }
+        });
+        
+        // 10分以上前のセッションは自動的に終了
+        const cleanupPromises = expiredSessions.map(async (session) => {
+          const sessionRef = doc(db, 'sessions', session.id);
+          await updateDoc(sessionRef, {
+            isActive: false,
+            endTime: now
+          });
+        });
+        
+        await Promise.all(cleanupPromises);
+        
+        // 10分以内のセッションは自動継続
+        if (autoResumeSessions.length > 0) {
+          const sessionToResume = autoResumeSessions[0];
+          
+          // 既存セッションを継続
+          setTrackingSession(sessionToResume);
+          setIsTracking(true);
+          
+          // 位置情報監視を再開
+          const sessionId = sessionToResume.id;
+          
+          // バッチ処理タイマー開始
+          if (batchIntervalRef.current) {
+            clearInterval(batchIntervalRef.current);
+          }
+          
+          batchIntervalRef.current = setInterval(() => {
+            flushPendingPoints(sessionId);
+          }, optimizationSettings.batchInterval);
+          
+          // 位置情報監視開始
+          if (navigator.geolocation) {
+            watchIdRef.current = navigator.geolocation.watchPosition(
+              (position) => {
+                if (!validatePosition(position)) return;
+                
+                const newLat = position.coords.latitude;
+                const newLng = position.coords.longitude;
+                const now = Date.now();
+                
+                if (!shouldUpdatePosition(newLat, newLng)) return;
+                
+                const newPoint: GeoPoint = {
+                  lat: newLat,
+                  lng: newLng,
+                  timestamp: new Date()
+                };
+                
+                setCurrentPosition([newLat, newLng]);
+                lastPositionRef.current = { lat: newLat, lng: newLng, timestamp: now };
+                
+                pendingPointsRef.current.push(newPoint);
+                setPendingCount(pendingPointsRef.current.length);
+                
+                setTrackingSession((prev) => {
+                  if (!prev) return null;
+                  return { ...prev, points: [...prev.points, newPoint] };
+                });
+              },
+              (error) => {
+                let errorDetails = '';
+                switch(error.code) {
+                  case 1:
+                    errorDetails = 'PERMISSION_DENIED: トラッキング中に位置情報の使用が拒否されました';
+                    break;
+                  case 2:
+                    errorDetails = 'POSITION_UNAVAILABLE: トラッキング中に位置情報を取得できませんでした';
+                    break;
+                  case 3:
+                    errorDetails = 'TIMEOUT: トラッキング中に位置情報の取得がタイムアウトしました';
+                    break;
+                  default:
+                    errorDetails = `Unknown tracking error (code: ${error.code})`;
+                }
+                
+                alert(`位置情報のトラッキング中にエラーが発生しました:\n${errorDetails}`);
+              },
+              {
+                enableHighAccuracy: false,
+                maximumAge: 30000,
+                timeout: 10000
+              }
+            );
+          }
+        }
+      } catch (error) {
+        // クリーンアップエラーは無視（アプリは継続動作）
+      }
+    };
+    
+    cleanupOrphanedSessions();
+  }, [userId]);
+
+  // ページ終了時のクリーンアップとvisibility管理
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && trackingSession?.isActive && !isTracking) {
+        // アクティブ復帰時に記録が停止していたら自動再開
+        setIsTracking(true);
+        
+        // 位置情報監視を再開
+        if (navigator.geolocation && trackingSession) {
+          const sessionId = trackingSession.id;
+          
+          // バッチ処理タイマー開始
+          if (batchIntervalRef.current) {
+            clearInterval(batchIntervalRef.current);
+          }
+          
+          batchIntervalRef.current = setInterval(() => {
+            flushPendingPoints(sessionId);
+          }, optimizationSettings.batchInterval);
+          
+          // 位置情報監視開始
+          watchIdRef.current = navigator.geolocation.watchPosition(
+            (position) => {
+              if (!validatePosition(position)) return;
+              
+              const newLat = position.coords.latitude;
+              const newLng = position.coords.longitude;
+              const now = Date.now();
+              
+              if (!shouldUpdatePosition(newLat, newLng)) return;
+              
+              const newPoint: GeoPoint = {
+                lat: newLat,
+                lng: newLng,
+                timestamp: new Date()
+              };
+              
+              setCurrentPosition([newLat, newLng]);
+              lastPositionRef.current = { lat: newLat, lng: newLng, timestamp: now };
+              
+              pendingPointsRef.current.push(newPoint);
+              setPendingCount(pendingPointsRef.current.length);
+              
+              setTrackingSession((prev) => {
+                if (!prev) return null;
+                return { ...prev, points: [...prev.points, newPoint] };
+              });
+            },
+            (error) => {
+              let errorDetails = '';
+              switch(error.code) {
+                case 1:
+                  errorDetails = 'PERMISSION_DENIED: トラッキング中に位置情報の使用が拒否されました';
+                  break;
+                case 2:
+                  errorDetails = 'POSITION_UNAVAILABLE: トラッキング中に位置情報を取得できませんでした';
+                  break;
+                case 3:
+                  errorDetails = 'TIMEOUT: トラッキング中に位置情報の取得がタイムアウトしました';
+                  break;
+                default:
+                  errorDetails = `Unknown tracking error (code: ${error.code})`;
+              }
+              
+              alert(`位置情報のトラッキング中にエラーが発生しました:\n${errorDetails}`);
+            },
+            {
+              enableHighAccuracy: false,
+              maximumAge: 30000,
+              timeout: 10000
+            }
+          );
+        }
+      }
+    };
+
+    // beforeunloadイベントでは非同期処理が制限されるため、
+    // 同期的にFirestoreに送信を試みる
+    const handleSyncBeforeUnload = () => {
+      if (trackingSession?.isActive) {
+        // Navigator.sendBeacon を使用して同期的に送信
+        const updateData = {
+          endTime: new Date(),
+          isActive: false
+        };
+        
+        // 可能であれば sendBeacon で送信
+        if (navigator.sendBeacon) {
+          const url = `https://firestore.googleapis.com/v1/projects/${process.env.REACT_APP_FIREBASE_PROJECT_ID}/databases/(default)/documents/sessions/${trackingSession.id}`;
+          const payload = JSON.stringify(updateData);
+          navigator.sendBeacon(url, payload);
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleSyncBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleSyncBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [trackingSession, isTracking, flushPendingPoints, optimizationSettings.batchInterval, validatePosition, shouldUpdatePosition]);
 
   useEffect(() => {
     
@@ -292,6 +526,17 @@ export function MapView({ userId }: MapViewProps) {
             lng: position.coords.longitude, 
             timestamp: Date.now() 
           };
+          
+          // 初回アクセス時の自動記録開始チェック
+          const hasVisited = localStorage.getItem('footpath_visited');
+          if (!hasVisited && !autoStartRef.current) {
+            autoStartRef.current = true;
+            localStorage.setItem('footpath_visited', 'true');
+            // 位置情報取得後に自動的に記録開始
+            setTimeout(() => {
+              startTracking();
+            }, 1000);
+          }
           
         },
         () => {
