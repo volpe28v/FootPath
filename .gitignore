@@ -30,3 +30,4 @@ dist-ssr
 
 # Firebase
 .firebase/*.cache
+.firebase/hosting.*.cache

@@ -300,6 +300,17 @@ export function MapView({ userId }: MapViewProps) {
               }
             );
           }
+        } else {
+          // アクティブセッションがない場合、記録状態を確認
+          const hasVisited = localStorage.getItem('footpath_visited');
+          const wasTracking = localStorage.getItem('footpath_was_tracking');
+          
+          if (hasVisited && wasTracking === 'true' && !isTracking) {
+            // 前回記録中だった場合、自動的に新しいセッションを開始
+            setTimeout(() => {
+              startTracking();
+            }, 2000); // 2秒後に自動開始
+          }
         }
       } catch (error) {
         // クリーンアップエラーは無視（アプリは継続動作）
@@ -527,15 +538,20 @@ export function MapView({ userId }: MapViewProps) {
             timestamp: Date.now() 
           };
           
-          // 初回アクセス時の自動記録開始チェック
+          // 自動記録開始チェック
           const hasVisited = localStorage.getItem('footpath_visited');
           if (!hasVisited && !autoStartRef.current) {
+            // 初回アクセス時
             autoStartRef.current = true;
             localStorage.setItem('footpath_visited', 'true');
             // 位置情報取得後に自動的に記録開始
             setTimeout(() => {
               startTracking();
             }, 1000);
+          } else if (hasVisited && !autoStartRef.current && !isTracking) {
+            // 再読み込み時の自動記録再開チェック
+            // アクティブセッションがあるかどうかを後で確認
+            autoStartRef.current = true;
           }
           
         },
@@ -561,6 +577,9 @@ export function MapView({ userId }: MapViewProps) {
     }
 
     setIsTracking(true);
+    
+    // 記録状態をLocalStorageに保存
+    localStorage.setItem('footpath_was_tracking', 'true');
     
     const newSession: Omit<TrackingSession, 'id'> = {
       userId,
@@ -653,6 +672,9 @@ export function MapView({ userId }: MapViewProps) {
   const stopTracking = async () => {
     setIsTracking(false);
     
+    // 記録停止状態をLocalStorageに保存
+    localStorage.setItem('footpath_was_tracking', 'false');
+    
     if (watchIdRef.current !== null) {
       // 通常のgeolocation watchまたはデモモードのintervalをクリア
       if (typeof watchIdRef.current === 'number') {
@@ -695,6 +717,9 @@ export function MapView({ userId }: MapViewProps) {
   // デモモード用の関数 - より現実的な散策シミュレーション
   const startDemoMode = async () => {
     setIsTracking(true);
+    
+    // 記録状態をLocalStorageに保存
+    localStorage.setItem('footpath_was_tracking', 'true');
     
     const newSession: Omit<TrackingSession, 'id'> = {
       userId,
