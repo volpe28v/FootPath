@@ -870,9 +870,6 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
     setPendingCount(0);
   };
 
-  const currentTrackPositions: LatLngExpression[] = trackingSession 
-    ? trackingSession.points.map(point => [point.lat, point.lng])
-    : [];
 
   // カメラボタンクリック（標準カメラアプリを起動）
   const handleCameraClick = () => {
@@ -1245,16 +1242,119 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
           opacity={0.8}
         />
         
-        {currentPosition && (
-          <Marker position={currentPosition} icon={createEmojiIcon()} />
-        )}
         
         {/* 写真マーカー */}
+        
+        
+        
+        <ExploredAreaLayer 
+          exploredAreas={[...historyExploredAreas, ...exploredAreas]} 
+          isVisible={showExplorationLayer} 
+        />
+        
+        {/* 軌跡線を最上位レイヤーに再配置（スプライン補間） */}
+        {trackingSession && trackingSession.points && trackingSession.points.length > 1 && (() => {
+          const validPoints = trackingSession.points
+            .filter(point => point && point.lat && point.lng)
+            .map(point => [point.lat, point.lng] as [number, number]);
+          
+          // Catmull-Romスプライン補間
+          const interpolateSpline = (points: [number, number][]) => {
+            if (points.length < 2) return points;
+            if (points.length === 2) return points;
+            
+            const interpolated: [number, number][] = [];
+            
+            for (let i = 0; i < points.length - 1; i++) {
+              const p0 = i > 0 ? points[i - 1] : points[i];
+              const p1 = points[i];
+              const p2 = points[i + 1];
+              const p3 = i < points.length - 2 ? points[i + 2] : points[i + 1];
+              
+              interpolated.push(p1);
+              
+              // スプライン補間で中間点を生成
+              const segments = 20; // 各区間を20分割
+              for (let j = 1; j < segments; j++) {
+                const t = j / segments;
+                const t2 = t * t;
+                const t3 = t2 * t;
+                
+                const lat = 0.5 * (
+                  (2 * p1[0]) +
+                  (-p0[0] + p2[0]) * t +
+                  (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 +
+                  (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3
+                );
+                
+                const lng = 0.5 * (
+                  (2 * p1[1]) +
+                  (-p0[1] + p2[1]) * t +
+                  (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 +
+                  (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3
+                );
+                
+                interpolated.push([lat, lng] as [number, number]);
+              }
+            }
+            
+            // 最後の点を追加
+            interpolated.push(points[points.length - 1]);
+            return interpolated;
+          };
+          
+          const smoothedPositions = interpolateSpline(validPoints);
+          
+          return (
+            <>
+              {/* 外側のグロー効果 */}
+              <Polyline 
+                positions={smoothedPositions} 
+                pathOptions={{
+                  color: "#ff6b00",
+                  weight: 12,
+                  opacity: 0.2,
+                  lineCap: "round",
+                  lineJoin: "round"
+                }}
+                pane="tooltipPane"
+              />
+              {/* 中間のグロー効果 */}
+              <Polyline 
+                positions={smoothedPositions} 
+                pathOptions={{
+                  color: "#ff6b00",
+                  weight: 8,
+                  opacity: 0.4,
+                  lineCap: "round",
+                  lineJoin: "round"
+                }}
+                pane="tooltipPane"
+              />
+              {/* メインの線 */}
+              <Polyline 
+                positions={smoothedPositions} 
+                pathOptions={{
+                  color: "#ffaa44",
+                  weight: 4,
+                  opacity: 0.95,
+                  lineCap: "round",
+                  lineJoin: "round"
+                }}
+                pane="tooltipPane"
+              />
+            </>
+          );
+        })()}
+        
+        {/* 写真マーカーを最上位に配置 */}
         {photos.map((photo) => (
           <Marker
             key={photo.id}
             position={[photo.location.lat, photo.location.lng]}
             icon={createPhotoIcon()}
+            pane="markerPane"
+            zIndexOffset={1000}
           >
             <Popup maxWidth={180} className="photo-popup">
               <div className="text-center w-full">
@@ -1280,21 +1380,15 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
           </Marker>
         ))}
         
-        {currentTrackPositions.length > 0 && (
-          <Polyline 
-            positions={currentTrackPositions} 
-            color="#00d9ff" 
-            weight={4}
-            opacity={0.9}
-            dashArray="8, 4"
+        {/* 現在位置マーカーを最上位に配置 */}
+        {currentPosition && (
+          <Marker 
+            position={currentPosition} 
+            icon={createEmojiIcon()} 
+            pane="popupPane"
+            zIndexOffset={3000}
           />
         )}
-        
-        <ExploredAreaLayer 
-          exploredAreas={[...historyExploredAreas, ...exploredAreas]} 
-          isVisible={showExplorationLayer} 
-        />
-        
         
         <LocationUpdater position={currentPosition} />
       </MapContainer>
