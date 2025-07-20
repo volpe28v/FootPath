@@ -1043,7 +1043,6 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
           }}
         >
           <span style={{position: 'relative', zIndex: 10, display: 'flex', alignItems: 'center', gap: '6px'}}>
-            <span style={{width: '6px', height: '6px', borderRadius: '50%', backgroundColor: isTracking ? '#fca5a5' : '#86efac', animation: isTracking ? 'pulse 2s infinite' : 'none'}}></span>
             {isTracking ? 'STOP' : 'REC'}
           </span>
         </button>
@@ -1091,9 +1090,8 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
             {isUploading ? (
               <div style={{width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ffffff', animation: 'pulse 2s infinite'}}></div>
             ) : (
-              <span style={{width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#67e8f9'}}></span>
+              <span style={{fontSize: '20px'}}>📷</span>
             )}
-            <span style={{fontSize: '16px'}}>📷</span>
           </span>
         </button>
         
@@ -1173,7 +1171,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
         {isUploading && (
           <div style={{display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 12px', backgroundColor: '#1e293b', borderRadius: '8px', border: '1px solid #475569', height: '32px'}}>
             <div style={{width: '12px', height: '12px', border: '2px solid #67e8f9', borderTop: '2px solid transparent', borderRadius: '50%', animation: 'spin 1s linear infinite'}}></div>
-            <span style={{color: '#67e8f9', fontFamily: 'monospace', fontSize: '16px'}}>📷</span>
+            <span style={{color: '#67e8f9', fontFamily: 'monospace', fontSize: '20px'}}>📷</span>
           </div>
         )}
 
