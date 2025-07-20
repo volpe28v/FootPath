@@ -32,9 +32,9 @@ export function ExploredAreaLayer({ exploredAreas, isVisible }: ExploredAreaLaye
             center={[area.lat, area.lng]}
             radius={area.radius}
             pathOptions={{
-              fillColor: '#00ff00',
-              fillOpacity: 0.5,
-              color: '#00ff00',
+              fillColor: '#00ffff',
+              fillOpacity: 0.25,
+              color: 'transparent',
               weight: 0,
               opacity: 0,
             }}

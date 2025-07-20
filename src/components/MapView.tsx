@@ -1240,9 +1240,9 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
           className="h-full w-full"
         >
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          opacity={0.6}
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors | &copy; <a href="https://cartodb.com/attributions">CartoDB</a>'
+          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+          opacity={0.8}
         />
         
         {currentPosition && (
@@ -1283,10 +1283,10 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
         {currentTrackPositions.length > 0 && (
           <Polyline 
             positions={currentTrackPositions} 
-            color="#10b981" 
-            weight={6}
-            opacity={0.8}
-            dashArray="5, 10"
+            color="#00d9ff" 
+            weight={4}
+            opacity={0.9}
+            dashArray="8, 4"
           />
         )}
         

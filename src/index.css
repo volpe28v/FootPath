@@ -6,6 +6,13 @@ body {
   margin: 0;
   padding: 0;
   font-family: system-ui, -apple-system, sans-serif;
+  background: linear-gradient(135deg, #0f172a, #1e293b, #0f172a);
+  min-height: 100vh;
+  line-height: 1.6;
+}
+
+html {
+  background: #0f172a;
 }
 
 /* 絵文字マーカー用のスタイル */
