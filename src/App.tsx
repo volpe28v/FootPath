@@ -83,22 +83,7 @@ function App() {
 
   return (
     <div className="relative h-screen">
-      <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 1003 }}>
-        <button
-          onClick={handleLogout}
-          className="bg-slate-800 border border-slate-600 rounded-full shadow-lg p-1 hover:shadow-xl hover:border-cyan-400 transition-all duration-300 cursor-pointer transform hover:scale-105"
-          title={user.displayName || 'ユーザー'}
-          style={{ pointerEvents: 'auto' }}
-        >
-          <img
-            src={user.photoURL || ''}
-            alt={user.displayName || ''}
-            style={{ width: '40px', height: '40px', pointerEvents: 'none' }}
-            className="rounded-full"
-          />
-        </button>
-      </div>
-      <MapView userId={user.uid} />
+      <MapView userId={user.uid} user={user} onLogout={handleLogout} />
     </div>
   );
 }

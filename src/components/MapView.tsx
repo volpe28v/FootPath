@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet';
 import type { LatLngExpression } from 'leaflet';
 import L from 'leaflet';
-import { collection, addDoc, query, where, onSnapshot, updateDoc, doc, arrayUnion, getDocs } from 'firebase/firestore';
+import { collection, addDoc, query, where, updateDoc, doc, arrayUnion, getDocs } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage, auth } from '../firebase';
 import type { GeoPoint, TrackingSession } from '../types/GeoPoint';
@@ -68,6 +68,8 @@ const createPhotoIcon = () => {
 
 interface MapViewProps {
   userId: string;
+  user: { displayName: string | null; photoURL: string | null; };
+  onLogout: () => void;
 }
 
 function LocationUpdater({ position }: { position: LatLngExpression | null }) {
@@ -82,7 +84,7 @@ function LocationUpdater({ position }: { position: LatLngExpression | null }) {
   return null;
 }
 
-export function MapView({ userId }: MapViewProps) {
+export function MapView({ userId, user, onLogout }: MapViewProps) {
   const [currentPosition, setCurrentPosition] = useState<LatLngExpression | null>(null);
   const [isTracking, setIsTracking] = useState(false);
   const [trackingSession, setTrackingSession] = useState<TrackingSession | null>(null);
@@ -497,30 +499,38 @@ export function MapView({ userId }: MapViewProps) {
     };
   }, [trackingSession, isTracking, flushPendingPoints, optimizationSettings.batchInterval, validatePosition, shouldUpdatePosition]);
 
-  useEffect(() => {
-    
-    const sessionsRef = collection(db, 'sessions');
-    
-    // まず全てのセッションを取得してデバッグ
-    const allSessionsQuery = query(sessionsRef);
-    
-    const unsubscribe = onSnapshot(allSessionsQuery, (snapshot) => {
-      
-      // 全てのセッションをログ出力
-      snapshot.forEach((doc) => {
-        doc.data();
-      });
-    });
-    
-    // ユーザー固有のクエリ
-    const userQuery = query(
-      sessionsRef, 
-      where('userId', '==', userId)
-    );
+  // データキャッシュ用のRef
+  const dataCache = useRef<{
+    sessions: TrackingSession[];
+    lastFetch: number;
+    cacheExpiry: number;
+  }>({
+    sessions: [],
+    lastFetch: 0,
+    cacheExpiry: 5 * 60 * 1000 // 5分キャッシュ
+  });
 
-    const userUnsubscribe = onSnapshot(userQuery, (snapshot) => {
+  // セッションデータを取得（キャッシュ対応）
+  const loadSessionData = async (forceRefresh = false) => {
+    try {
+      const now = Date.now();
       
-      const points: GeoPoint[] = [];
+      // キャッシュが有効でforceRefreshでない場合はキャッシュを使用
+      if (!forceRefresh && 
+          dataCache.current.sessions.length > 0 && 
+          (now - dataCache.current.lastFetch) < dataCache.current.cacheExpiry) {
+        console.log('Using cached session data');
+        processSessionData(dataCache.current.sessions);
+        return;
+      }
+
+      const sessionsRef = collection(db, 'sessions');
+      const userQuery = query(
+        sessionsRef, 
+        where('userId', '==', userId)
+      );
+
+      const snapshot = await getDocs(userQuery);
       const sessions: TrackingSession[] = [];
       
       snapshot.forEach((doc) => {
@@ -535,47 +545,86 @@ export function MapView({ userId }: MapViewProps) {
               : point.timestamp
           }));
           session.points = convertedPoints;
-          
-          // アクティブでないセッションのポイントのみを履歴に追加
-          if (!session.isActive) {
-            points.push(...convertedPoints);
-          }
         }
         
         sessions.push(session);
       });
       
+      // キャッシュ更新
+      dataCache.current = {
+        sessions,
+        lastFetch: now,
+        cacheExpiry: 5 * 60 * 1000
+      };
       
-      // 総データ数を更新
-      setTotalPointsCount(points.length);
-      
-      // 全履歴ポイントから探索エリアを生成
-      if (points.length > 0) {
-        const historicalAreas = generateExploredAreas(points, userId);
-        setHistoryExploredAreas(historicalAreas);
-        
-        // 統計を履歴込みで更新
-        const historicalStats = calculateExplorationStats(historicalAreas);
-        setExplorationStats(historicalStats);
-      } else {
-        setHistoryExploredAreas([]);
-      }
-      
-    });
+      processSessionData(sessions);
+      console.log('Session data loaded:', sessions.length, 'sessions');
+    } catch (error) {
+      console.error('Error loading session data:', error);
+    }
+  };
 
-    return () => {
-      unsubscribe();
-      userUnsubscribe();
-    };
+  // セッションデータ処理を分離
+  const processSessionData = (sessions: TrackingSession[]) => {
+    const points: GeoPoint[] = [];
+    
+    sessions.forEach(session => {
+      if (session.points && session.points.length > 0 && !session.isActive) {
+        points.push(...session.points);
+      }
+    });
+    
+    // 総データ数を更新
+    setTotalPointsCount(points.length);
+    
+    // 全履歴ポイントから探索エリアを生成
+    if (points.length > 0) {
+      const historicalAreas = generateExploredAreas(points, userId);
+      setHistoryExploredAreas(historicalAreas);
+      
+      // 統計を履歴込みで更新
+      const historicalStats = calculateExplorationStats(historicalAreas);
+      setExplorationStats(historicalStats);
+    } else {
+      setHistoryExploredAreas([]);
+    }
+  };
+
+  useEffect(() => {
+    loadSessionData();
   }, [userId]);
 
-  // 写真データの読み込み
-  useEffect(() => {
-    const photosRef = collection(db, 'photos');
-    const photosQuery = query(photosRef, where('userId', '==', userId));
+  // 写真データキャッシュ
+  const photoCache = useRef<{
+    photos: Photo[];
+    lastFetch: number;
+    cacheExpiry: number;
+  }>({
+    photos: [],
+    lastFetch: 0,
+    cacheExpiry: 5 * 60 * 1000 // 5分キャッシュ
+  });
 
-    const unsubscribe = onSnapshot(photosQuery, (snapshot) => {
+  // 写真データを取得（キャッシュ対応）
+  const loadPhotoData = async (forceRefresh = false) => {
+    try {
+      const now = Date.now();
+      
+      // キャッシュが有効でforceRefreshでない場合はキャッシュを使用
+      if (!forceRefresh && 
+          photoCache.current.photos.length > 0 && 
+          (now - photoCache.current.lastFetch) < photoCache.current.cacheExpiry) {
+        console.log('Using cached photo data');
+        setPhotos(photoCache.current.photos);
+        return;
+      }
+
+      const photosRef = collection(db, 'photos');
+      const photosQuery = query(photosRef, where('userId', '==', userId));
+      
+      const snapshot = await getDocs(photosQuery);
       const photoList: Photo[] = [];
+      
       snapshot.forEach((doc) => {
         const photoData = doc.data();
         const photo: Photo = {
@@ -593,11 +642,22 @@ export function MapView({ userId }: MapViewProps) {
         photoList.push(photo);
       });
       
-      console.log('Loaded photos:', photoList.length);
+      // キャッシュ更新
+      photoCache.current = {
+        photos: photoList,
+        lastFetch: now,
+        cacheExpiry: 5 * 60 * 1000
+      };
+      
+      console.log('Photo data loaded:', photoList.length, 'photos');
       setPhotos(photoList);
-    });
+    } catch (error) {
+      console.error('Error loading photo data:', error);
+    }
+  };
 
-    return () => unsubscribe();
+  useEffect(() => {
+    loadPhotoData();
   }, [userId]);
 
 
@@ -780,14 +840,7 @@ export function MapView({ userId }: MapViewProps) {
     localStorage.setItem('footpath_was_tracking', 'false');
     
     if (watchIdRef.current !== null) {
-      // 通常のgeolocation watchまたはデモモードのintervalをクリア
-      if (typeof watchIdRef.current === 'number') {
-        // デモモードの場合：setIntervalのIDをクリア
-        clearInterval(watchIdRef.current);
-      } else {
-        // 通常モードの場合：geolocation watchをクリア
-        navigator.geolocation.clearWatch(watchIdRef.current);
-      }
+      navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }
     
@@ -805,6 +858,9 @@ export function MapView({ userId }: MapViewProps) {
         endTime: new Date(),
         isActive: false
       });
+      
+      // セッション終了後にデータを強制リフレッシュ
+      await loadSessionData(true);
     }
 
     // 状態をリセット
@@ -817,126 +873,6 @@ export function MapView({ userId }: MapViewProps) {
   const currentTrackPositions: LatLngExpression[] = trackingSession 
     ? trackingSession.points.map(point => [point.lat, point.lng])
     : [];
-
-  // デモモード用の関数 - より現実的な散策シミュレーション
-  const startDemoMode = async () => {
-    setIsTracking(true);
-    
-    // 記録状態をLocalStorageに保存
-    localStorage.setItem('footpath_was_tracking', 'true');
-    
-    const newSession: Omit<TrackingSession, 'id'> = {
-      userId,
-      points: [],
-      startTime: new Date(),
-      isActive: true,
-      storageMode: 'incremental',
-      minDistance: optimizationSettings.minDistance
-    };
-
-    const docRef = await addDoc(collection(db, 'sessions'), newSession);
-    const sessionId = docRef.id;
-    
-    setTrackingSession({ ...newSession, id: sessionId });
-
-    // デモ用の移動シミュレーション状態
-    let lat = Array.isArray(currentPosition) ? currentPosition[0] as number : 35.6812;
-    let lng = Array.isArray(currentPosition) ? currentPosition[1] as number : 139.7671;
-    
-    // 散策の状態
-    let direction = Math.random() * Math.PI * 2; // 初期方向（ラジアン）
-    let speed = 1.2; // 歩行速度 (m/s) - 時速約4.3km
-    let isResting = false;
-    let restTimer = 0;
-    let walkDuration = 0;
-    const turnTendency = (Math.random() - 0.5) * 0.3; // 左右への曲がり癖
-
-    // 既存のバッチ処理タイマーをクリア
-    if (batchIntervalRef.current) {
-      clearInterval(batchIntervalRef.current);
-    }
-
-    // バッチ処理タイマー開始（30秒間隔）
-    batchIntervalRef.current = setInterval(() => {
-      flushPendingPoints(sessionId);
-      console.log('startDemoMode: flush');
-    }, optimizationSettings.batchInterval);
-
-    const demoInterval = setInterval(() => {
-      walkDuration++;
-      
-      // 休憩の処理
-      if (isResting) {
-        restTimer--;
-        if (restTimer <= 0) {
-          isResting = false;
-        }
-        return;
-      }
-      
-      // 10-30分ごとにランダムに休憩（1-3分）
-      if (walkDuration > 0 && walkDuration % (600 + Math.floor(Math.random() * 1200)) === 0) {
-        isResting = true;
-        restTimer = 60 + Math.floor(Math.random() * 120); // 1-3分休憩
-        return;
-      }
-      
-      // 歩行速度を5m/s固定
-      speed = 5.0;
-      
-      // 方向の自然な変化
-      direction += (Math.random() - 0.5) * 0.15 + turnTendency; // 基本的な揺らぎ + 曲がり癖
-      
-      // たまに大きく方向転換（交差点など）
-      if (Math.random() < 0.05) {
-        direction += (Math.random() - 0.5) * Math.PI / 2; // 最大90度の方向転換
-      }
-      
-      // 移動距離の計算（1秒あたり）
-      const distanceMeters = speed;
-      
-      // 緯度経度への変換（おおよその計算）
-      const metersPerDegLat = 111000; // 緯度1度あたり約111km
-      const metersPerDegLng = 111000 * Math.cos(lat * Math.PI / 180); // 経度は緯度により変化
-      
-      const deltaLat = (distanceMeters * Math.cos(direction)) / metersPerDegLat;
-      const deltaLng = (distanceMeters * Math.sin(direction)) / metersPerDegLng;
-      
-      lat += deltaLat;
-      lng += deltaLng;
-
-      // 現在位置を常に更新（UI表示用）
-      setCurrentPosition([lat, lng]);
-      
-      // 距離ベースフィルタリング（デモモードでも適用）
-      if (!shouldUpdatePosition(lat, lng)) {
-        // 位置は更新するが、記録はスキップ
-        return;
-      }
-
-      const newPoint: GeoPoint = {
-        lat,
-        lng,
-        timestamp: new Date()
-      };
-
-      lastPositionRef.current = { lat, lng, timestamp: Date.now() };
-
-      // ペンディングキューに追加
-      pendingPointsRef.current.push(newPoint);
-      setPendingCount(pendingPointsRef.current.length);
-
-      // ローカル状態は即座に更新
-      setTrackingSession((prev) => {
-        const currentSession = prev || { points: [], id: sessionId, userId, startTime: new Date(), isActive: true };
-        return { ...currentSession, points: [...currentSession.points, newPoint] };
-      });
-    }, 1000); // 1秒ごとに更新（現実的な更新頻度）
-
-    // インターバルIDを保存
-    watchIdRef.current = demoInterval as unknown as number; // デモモード用に再利用
-    
-  };
 
   // カメラボタンクリック（標準カメラアプリを起動）
   const handleCameraClick = () => {
@@ -1036,6 +972,9 @@ export function MapView({ userId }: MapViewProps) {
       try {
         const docRef = await addDoc(collection(db, 'photos'), photoData);
         console.log('Photo saved with ID:', docRef.id);
+        
+        // 写真アップロード後に写真データを強制リフレッシュ
+        await loadPhotoData(true);
       } catch (firestoreError) {
         console.error('Firestore save error:', firestoreError);
         setIsUploading(false);
@@ -1063,88 +1002,224 @@ export function MapView({ userId }: MapViewProps) {
   return (
     <div className="relative h-screen w-full flex flex-col bg-slate-900">
       {/* ヘッダー部分 */}
-      <div className="bg-gradient-to-r from-slate-800 to-slate-900 border-b border-slate-700 p-4 z-[1002] flex items-center gap-4 shadow-2xl">
-        {/* 左側：コントロールボタン */}
-        <div className="flex items-center gap-3">
-          {/* 記録開始/停止ボタン */}
-          <button
-            onClick={isTracking ? stopTracking : startTracking}
-            className={`relative px-6 py-3 rounded-xl font-mono font-bold text-sm uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg ${
-              isTracking 
-                ? 'bg-gradient-to-r from-red-600 to-red-700 text-white hover:from-red-500 hover:to-red-600 shadow-red-500/25 hover:shadow-red-500/50' 
-                : 'bg-gradient-to-r from-emerald-600 to-emerald-700 text-white hover:from-emerald-500 hover:to-emerald-600 shadow-emerald-500/25 hover:shadow-emerald-500/50'
-            } before:absolute before:inset-0 before:rounded-xl before:bg-gradient-to-r ${
-              isTracking 
-                ? 'before:from-red-400 before:to-red-500' 
-                : 'before:from-emerald-400 before:to-emerald-500'
-            } before:opacity-0 hover:before:opacity-20 before:transition-opacity`}
-          >
-            <span className="relative z-10 flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${isTracking ? 'bg-red-300 animate-pulse' : 'bg-emerald-300'}`}></span>
-              {isTracking ? 'STOP REC' : 'START REC'}
-            </span>
-          </button>
-          
-          {/* カメラボタン */}
-          <button
-            onClick={handleCameraClick}
-            disabled={isUploading}
-            className={`relative px-6 py-3 rounded-xl font-mono font-bold text-sm uppercase tracking-wider transition-all duration-300 transform shadow-lg ${
-              isUploading 
-                ? 'bg-gray-500 cursor-not-allowed opacity-70' 
-                : 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:from-cyan-500 hover:to-blue-500 hover:scale-105 shadow-cyan-500/25 hover:shadow-cyan-500/50 before:absolute before:inset-0 before:rounded-xl before:bg-gradient-to-r before:from-cyan-400 before:to-blue-400 before:opacity-0 hover:before:opacity-20 before:transition-opacity'
-            }`}
-          >
-            <span className="relative z-10 flex items-center gap-2">
-              {isUploading ? (
-                <div className="w-2 h-2 rounded-full bg-white animate-pulse"></div>
-              ) : (
-                <span className="w-2 h-2 rounded-full bg-cyan-300"></span>
-              )}
-              {isUploading ? 'UPLOADING...' : 'CAMERA'}
-            </span>
-          </button>
-          
-          {/* 隠しファイル入力 */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={handleFileSelect}
-            className="hidden"
-          />
-          
-          {/* デモモードボタン */}
-          <button
-            onClick={startDemoMode}
-            className="relative px-6 py-3 rounded-xl font-mono font-bold text-sm uppercase tracking-wider bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-500 hover:to-indigo-500 transition-all duration-300 transform hover:scale-105 shadow-lg shadow-purple-500/25 hover:shadow-purple-500/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 before:absolute before:inset-0 before:rounded-xl before:bg-gradient-to-r before:from-purple-400 before:to-indigo-400 before:opacity-0 hover:before:opacity-20 before:transition-opacity"
-            disabled={isTracking}
-          >
-            <span className="relative z-10 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-purple-300"></span>
-              DEMO MODE
-            </span>
-          </button>
-          
-          {/* データ数表示 */}
-          <div className="relative px-6 py-3 rounded-xl font-mono font-bold text-lg bg-slate-800 text-cyan-400 border border-slate-600 shadow-lg">
-            <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 rounded-xl"></div>
-            <div className="relative z-10 flex items-center gap-2">
-              <span className="text-white">{totalPointsCount + (trackingSession?.points?.length || 0) - pendingCount}</span>
-              <span className="text-slate-400">:</span>
-              <span className="text-yellow-400">{pendingCount}</span>
-            </div>
+      <div style={{background: 'linear-gradient(to right, #1e293b, #0f172a)', borderBottom: '1px solid #334155', padding: '8px 16px', zIndex: 1002, display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'}}>
+        {/* 記録開始/停止ボタン */}
+        <button
+          onClick={isTracking ? stopTracking : startTracking}
+          style={{
+            position: 'relative',
+            padding: '8px 16px',
+            borderRadius: '8px',
+            fontFamily: 'monospace',
+            fontWeight: 'bold',
+            fontSize: '12px',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            transition: 'all 0.2s ease',
+            background: isTracking 
+              ? 'linear-gradient(to right, #dc2626, #b91c1c)' 
+              : 'linear-gradient(to right, #059669, #047857)',
+            color: '#ffffff',
+            border: 'none',
+            cursor: 'pointer',
+            boxShadow: isTracking 
+              ? '0 4px 6px -1px rgba(220, 38, 38, 0.2)' 
+              : '0 4px 6px -1px rgba(5, 150, 105, 0.2)',
+            height: '32px',
+            display: 'flex',
+            alignItems: 'center'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'scale(1.02)';
+            e.currentTarget.style.background = isTracking 
+              ? 'linear-gradient(to right, #ef4444, #dc2626)' 
+              : 'linear-gradient(to right, #10b981, #059669)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+            e.currentTarget.style.background = isTracking 
+              ? 'linear-gradient(to right, #dc2626, #b91c1c)' 
+              : 'linear-gradient(to right, #059669, #047857)';
+          }}
+        >
+          <span style={{position: 'relative', zIndex: 10, display: 'flex', alignItems: 'center', gap: '6px'}}>
+            <span style={{width: '6px', height: '6px', borderRadius: '50%', backgroundColor: isTracking ? '#fca5a5' : '#86efac', animation: isTracking ? 'pulse 2s infinite' : 'none'}}></span>
+            {isTracking ? 'STOP' : 'REC'}
+          </span>
+        </button>
+        
+        {/* カメラボタン */}
+        <button
+          onClick={handleCameraClick}
+          disabled={isUploading}
+          style={{
+            position: 'relative',
+            padding: '8px 16px',
+            borderRadius: '8px',
+            fontFamily: 'monospace',
+            fontWeight: 'bold',
+            fontSize: '12px',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            transition: 'all 0.2s ease',
+            background: isUploading 
+              ? '#6b7280' 
+              : 'linear-gradient(to right, #0891b2, #0284c7)',
+            color: '#ffffff',
+            border: 'none',
+            cursor: isUploading ? 'not-allowed' : 'pointer',
+            opacity: isUploading ? 0.7 : 1,
+            boxShadow: '0 4px 6px -1px rgba(8, 145, 178, 0.2)',
+            height: '32px',
+            display: 'flex',
+            alignItems: 'center'
+          }}
+          onMouseEnter={(e) => {
+            if (!isUploading) {
+              e.currentTarget.style.transform = 'scale(1.02)';
+              e.currentTarget.style.background = 'linear-gradient(to right, #06b6d4, #0891b2)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!isUploading) {
+              e.currentTarget.style.transform = 'scale(1)';
+              e.currentTarget.style.background = 'linear-gradient(to right, #0891b2, #0284c7)';
+            }
+          }}
+        >
+          <span style={{position: 'relative', zIndex: 10, display: 'flex', alignItems: 'center', gap: '6px'}}>
+            {isUploading ? (
+              <div style={{width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ffffff', animation: 'pulse 2s infinite'}}></div>
+            ) : (
+              <span style={{width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#67e8f9'}}></span>
+            )}
+            <span style={{fontSize: '16px'}}>📷</span>
+          </span>
+        </button>
+        
+        {/* 隠しファイル入力 */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleFileSelect}
+          style={{display: 'none'}}
+        />
+        
+        {/* リフレッシュボタン */}
+        <button
+          onClick={() => {
+            loadSessionData(true);
+            loadPhotoData(true);
+          }}
+          style={{
+            position: 'relative',
+            padding: '8px 12px',
+            borderRadius: '8px',
+            fontFamily: 'monospace',
+            fontWeight: 'bold',
+            fontSize: '12px',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            transition: 'all 0.2s ease',
+            background: 'linear-gradient(to right, #475569, #334155)',
+            color: '#ffffff',
+            border: 'none',
+            cursor: 'pointer',
+            boxShadow: '0 4px 6px -1px rgba(71, 85, 105, 0.2)',
+            height: '32px',
+            display: 'flex',
+            alignItems: 'center'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'scale(1.02)';
+            e.currentTarget.style.background = 'linear-gradient(to right, #64748b, #475569)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+            e.currentTarget.style.background = 'linear-gradient(to right, #475569, #334155)';
+          }}
+        >
+          <span style={{position: 'relative', zIndex: 10, display: 'flex', alignItems: 'center', gap: '4px'}}>
+            <span style={{fontSize: '18px'}}>🔄</span>
+          </span>
+        </button>
+
+        {/* データ数表示 */}
+        <div style={{
+          backgroundColor: '#1e293b', 
+          border: '1px solid #475569', 
+          borderRadius: '8px', 
+          padding: '0 12px', 
+          fontFamily: 'monospace', 
+          fontWeight: 'bold', 
+          fontSize: '14px',
+          position: 'relative',
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+          height: '32px',
+          display: 'flex',
+          alignItems: 'center'
+        }}>
+          <div style={{position: 'absolute', inset: '0', background: 'linear-gradient(to right, rgba(6, 182, 212, 0.1), rgba(59, 130, 246, 0.1))', borderRadius: '8px'}}></div>
+          <div style={{position: 'relative', zIndex: 10, display: 'flex', alignItems: 'center', gap: '4px'}}>
+            <span style={{color: '#ffffff'}}>{totalPointsCount + (trackingSession?.points?.length || 0) - pendingCount}</span>
+            <span style={{color: '#94a3b8'}}>:</span>
+            <span style={{color: '#67e8f9'}}>{pendingCount}</span>
           </div>
-          
-          {/* さりげないローディングアイコン */}
-          {isUploading && (
-            <div className="flex items-center gap-2 px-4 py-3 bg-slate-800 rounded-xl border border-slate-600">
-              <div className="w-4 h-4 border-2 border-cyan-300 border-t-transparent rounded-full animate-spin"></div>
-              <span className="text-cyan-300 font-mono text-sm">📷</span>
-            </div>
-          )}
-          
+        </div>
+        
+        {/* ローディングアイコン */}
+        {isUploading && (
+          <div style={{display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 12px', backgroundColor: '#1e293b', borderRadius: '8px', border: '1px solid #475569', height: '32px'}}>
+            <div style={{width: '12px', height: '12px', border: '2px solid #67e8f9', borderTop: '2px solid transparent', borderRadius: '50%', animation: 'spin 1s linear infinite'}}></div>
+            <span style={{color: '#67e8f9', fontFamily: 'monospace', fontSize: '16px'}}>📷</span>
+          </div>
+        )}
+
+        {/* 右側：Googleアカウントアイコン */}
+        <div style={{marginLeft: 'auto'}}>
+          <button
+            onClick={onLogout}
+            style={{
+              width: '32px',
+              height: '32px',
+              borderRadius: '50%',
+              border: '2px solid #475569',
+              background: '#1e293b',
+              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              padding: '0',
+              overflow: 'hidden'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'scale(1.05)';
+              e.currentTarget.style.boxShadow = '0 6px 8px -1px rgba(6, 182, 212, 0.3)';
+              e.currentTarget.style.borderColor = '#06b6d4';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+              e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
+              e.currentTarget.style.borderColor = '#475569';
+            }}
+            title={`${user.displayName || 'ユーザー'} - クリックでログアウト`}
+          >
+            {user.photoURL ? (
+              <img
+                src={user.photoURL}
+                alt={user.displayName || ''}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  borderRadius: '50%',
+                  objectFit: 'cover'
+                }}
+              />
+            ) : (
+              <span style={{fontSize: '16px', color: '#ffffff'}}>👤</span>
+            )}
+          </button>
         </div>
       </div>
 

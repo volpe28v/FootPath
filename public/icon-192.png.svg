@@ -1,0 +1,36 @@
+<svg width="192" height="192" viewBox="0 0 192 192" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="instaBg192" cx="30%" cy="30%" r="120%">
+      <stop offset="0%" style="stop-color:#fdf047"/>
+      <stop offset="25%" style="stop-color:#fd7c3c"/>
+      <stop offset="50%" style="stop-color:#e91e63"/>
+      <stop offset="75%" style="stop-color:#8e24aa"/>
+      <stop offset="100%" style="stop-color:#3f51b5"/>
+    </radialGradient>
+    <linearGradient id="gloss192" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:rgba(255,255,255,0.3)"/>
+      <stop offset="100%" style="stop-color:rgba(255,255,255,0)"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="192" height="192" rx="48" fill="url(#instaBg192)"/>
+  
+  <!-- Central F -->
+  <g transform="translate(96, 96)">
+    <path d="M -30 -45 L -30 45 L -15 45 L -15 7 L 15 7 L 15 -7 L -15 -7 L -15 -30 L 22 -30 L 22 -45 Z" 
+          fill="#ffffff" opacity="0.95"/>
+    
+    <!-- Decorative elements -->
+    <circle cx="-40" cy="-22" r="3" fill="rgba(255,255,255,0.8)"/>
+    <circle cx="-45" cy="-7" r="2" fill="rgba(255,255,255,0.6)"/>
+    <circle cx="40" cy="-15" r="3" fill="rgba(255,255,255,0.8)"/>
+    <circle cx="45" cy="0" r="2" fill="rgba(255,255,255,0.6)"/>
+    
+    <ellipse cx="0" cy="52" rx="22" ry="3" fill="rgba(255,255,255,0.3)"/>
+  </g>
+  
+  <!-- Glossy overlay -->
+  <rect width="192" height="192" rx="48" fill="url(#gloss192)"/>
+  <ellipse cx="67" cy="67" rx="45" ry="30" fill="rgba(255,255,255,0.15)"/>
+</svg>
