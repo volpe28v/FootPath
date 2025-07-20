@@ -1,11 +1,13 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { MapContainer, TileLayer, Polyline, Marker, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet';
 import type { LatLngExpression } from 'leaflet';
 import L from 'leaflet';
 import { collection, addDoc, query, where, onSnapshot, updateDoc, doc, arrayUnion, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage, auth } from '../firebase';
 import type { GeoPoint, TrackingSession } from '../types/GeoPoint';
 import type { ExploredArea, ExplorationStats } from '../types/ExploredArea';
+import type { Photo } from '../types/Photo';
 import { ExploredAreaLayer } from './ExploredAreaLayer';
 import { generateExploredAreas, calculateExplorationStats, calculateDistance } from '../utils/explorationUtils';
 import 'leaflet/dist/leaflet.css';
@@ -46,6 +48,24 @@ const createEmojiIcon = () => {
   });
 };
 
+// 写真マーカーアイコン
+const createPhotoIcon = () => {
+  const div = document.createElement('div');
+  div.innerHTML = '📷';
+  div.style.fontSize = '28px';
+  div.style.textAlign = 'center';
+  div.style.lineHeight = '1';
+  div.style.filter = 'drop-shadow(2px 2px 4px rgba(0,0,0,0.5))';
+  
+  return new L.DivIcon({
+    html: div.outerHTML,
+    iconSize: [28, 28],
+    iconAnchor: [14, 28],
+    popupAnchor: [0, -28],
+    className: 'photo-marker'
+  });
+};
+
 interface MapViewProps {
   userId: string;
 }
@@ -77,11 +97,64 @@ export function MapView({ userId }: MapViewProps) {
   const [showExplorationLayer] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
   const [totalPointsCount, setTotalPointsCount] = useState(0);
+  const [photos, setPhotos] = useState<Photo[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
   const watchIdRef = useRef<number | null>(null);
   const batchIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastPositionRef = useRef<{lat: number, lng: number, timestamp: number} | null>(null);
   const pendingPointsRef = useRef<GeoPoint[]>([]);
   const autoStartRef = useRef<boolean>(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // サムネイル生成関数
+  const generateThumbnail = (file: File, maxSize: number = 200): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      
+      img.onload = () => {
+        // アスペクト比を保持しながらリサイズ
+        const { width, height } = img;
+        let newWidth = width;
+        let newHeight = height;
+        
+        if (width > height) {
+          if (width > maxSize) {
+            newWidth = maxSize;
+            newHeight = (height * maxSize) / width;
+          }
+        } else {
+          if (height > maxSize) {
+            newHeight = maxSize;
+            newWidth = (width * maxSize) / height;
+          }
+        }
+        
+        canvas.width = newWidth;
+        canvas.height = newHeight;
+        
+        // 画像を描画
+        ctx?.drawImage(img, 0, 0, newWidth, newHeight);
+        
+        // Blobに変換
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('サムネイル生成に失敗しました'));
+            }
+          },
+          'image/jpeg',
+          0.7 // 品質70%
+        );
+      };
+      
+      img.onerror = () => reject(new Error('画像の読み込みに失敗しました'));
+      img.src = URL.createObjectURL(file);
+    });
+  };
 
   // バッチ処理でFirestoreに送信（増分保存）
   const flushPendingPoints = async (sessionId: string) => {
@@ -496,6 +569,37 @@ export function MapView({ userId }: MapViewProps) {
     };
   }, [userId]);
 
+  // 写真データの読み込み
+  useEffect(() => {
+    const photosRef = collection(db, 'photos');
+    const photosQuery = query(photosRef, where('userId', '==', userId));
+
+    const unsubscribe = onSnapshot(photosQuery, (snapshot) => {
+      const photoList: Photo[] = [];
+      snapshot.forEach((doc) => {
+        const photoData = doc.data();
+        const photo: Photo = {
+          id: doc.id,
+          userId: photoData.userId,
+          sessionId: photoData.sessionId,
+          location: photoData.location,
+          imageUrl: photoData.imageUrl,
+          thumbnailUrl: photoData.thumbnailUrl || photoData.imageUrl,
+          caption: photoData.caption,
+          timestamp: photoData.timestamp?.toDate() || new Date(),
+          tags: photoData.tags || [],
+          isPublic: photoData.isPublic || false
+        };
+        photoList.push(photo);
+      });
+      
+      console.log('Loaded photos:', photoList.length);
+      setPhotos(photoList);
+    });
+
+    return () => unsubscribe();
+  }, [userId]);
+
 
   useEffect(() => {
     // デバッグ情報の出力
@@ -834,6 +938,128 @@ export function MapView({ userId }: MapViewProps) {
     
   };
 
+  // カメラボタンクリック（標準カメラアプリを起動）
+  const handleCameraClick = () => {
+    if (!currentPosition) {
+      alert('位置情報を取得してから写真を撮影してください');
+      return;
+    }
+    
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  // ファイル選択時の処理
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !currentPosition) {
+      return;
+    }
+
+    console.log('Photo selected:', file.name, file.size);
+    
+    // ファイルサイズチェック（5MB制限）
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    if (file.size > maxSize) {
+      alert('ファイルサイズが大きすぎます。5MB以下の画像を選択してください。');
+      event.target.value = '';
+      return;
+    }
+    
+    try {
+      // 認証状態確認
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        alert('写真をアップロードするには認証が必要です');
+        event.target.value = '';
+        return;
+      }
+      
+      console.log('Current user:', currentUser.uid);
+      console.log('User ID from props:', userId);
+      
+      // アップロード開始
+      setIsUploading(true);
+      
+      // ファイル名を生成（タイムスタンプ + ランダム文字列）
+      const timestamp = new Date().getTime();
+      const randomId = Math.random().toString(36).substring(2, 15);
+      const fileExtension = file.name.split('.').pop() || 'jpg';
+      const fileName = `photos/${currentUser.uid}/${timestamp}_${randomId}.${fileExtension}`;
+      const thumbFileName = `photos/${currentUser.uid}/${timestamp}_${randomId}_thumb.${fileExtension}`;
+      
+      console.log('Uploading original to:', fileName);
+      console.log('Uploading thumbnail to:', thumbFileName);
+      
+      // サムネイル生成
+      console.log('Generating thumbnail...');
+      const thumbnailBlob = await generateThumbnail(file, 200);
+      console.log('Thumbnail generated, size:', thumbnailBlob.size);
+      
+      // 元画像をFirebase Storageにアップロード
+      const storageRef = ref(storage, fileName);
+      const uploadResult = await uploadBytes(storageRef, file);
+      console.log('Original upload successful:', uploadResult);
+      
+      // サムネイルをFirebase Storageにアップロード
+      const thumbStorageRef = ref(storage, thumbFileName);
+      const thumbUploadResult = await uploadBytes(thumbStorageRef, thumbnailBlob);
+      console.log('Thumbnail upload successful:', thumbUploadResult);
+      
+      // ダウンロードURLを取得
+      const downloadURL = await getDownloadURL(uploadResult.ref);
+      const thumbnailURL = await getDownloadURL(thumbUploadResult.ref);
+      console.log('Original URL:', downloadURL);
+      console.log('Thumbnail URL:', thumbnailURL);
+      
+      // Firestoreに写真情報を保存
+      const photoData = {
+        userId: currentUser.uid,
+        sessionId: trackingSession?.id || null,
+        location: {
+          lat: Array.isArray(currentPosition) ? currentPosition[0] : (currentPosition as any).lat,
+          lng: Array.isArray(currentPosition) ? currentPosition[1] : (currentPosition as any).lng
+        },
+        imageUrl: downloadURL,
+        thumbnailUrl: thumbnailURL,
+        fileName: file.name,
+        fileSize: file.size,
+        thumbnailSize: thumbnailBlob.size,
+        timestamp: new Date(),
+        isPublic: false, // デフォルトは非公開
+        createdAt: new Date()
+      };
+      
+      console.log('Saving photo data to Firestore:', photoData);
+      
+      try {
+        const docRef = await addDoc(collection(db, 'photos'), photoData);
+        console.log('Photo saved with ID:', docRef.id);
+      } catch (firestoreError) {
+        console.error('Firestore save error:', firestoreError);
+        setIsUploading(false);
+        // Storageアップロードは成功したので、そのことをユーザーに伝える
+        alert(`写真「${file.name}」のアップロードは成功しましたが、データベースへの保存でエラーが発生しました。`);
+        event.target.value = '';
+        return;
+      }
+      
+      // 成功時の処理
+      setIsUploading(false);
+      alert(`写真「${file.name}」をアップロードしました！`);
+      
+      // ファイル入力をリセット（同じファイルを再選択可能にする）
+      event.target.value = '';
+    } catch (error) {
+      console.error('Photo upload error:', error);
+      setIsUploading(false);
+      alert('写真のアップロードに失敗しました: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      event.target.value = '';
+    }
+  };
+
+
   return (
     <div className="relative h-screen w-full flex flex-col bg-slate-900">
       {/* ヘッダー部分 */}
@@ -859,6 +1085,36 @@ export function MapView({ userId }: MapViewProps) {
             </span>
           </button>
           
+          {/* カメラボタン */}
+          <button
+            onClick={handleCameraClick}
+            disabled={isUploading}
+            className={`relative px-6 py-3 rounded-xl font-mono font-bold text-sm uppercase tracking-wider transition-all duration-300 transform shadow-lg ${
+              isUploading 
+                ? 'bg-gray-500 cursor-not-allowed opacity-70' 
+                : 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:from-cyan-500 hover:to-blue-500 hover:scale-105 shadow-cyan-500/25 hover:shadow-cyan-500/50 before:absolute before:inset-0 before:rounded-xl before:bg-gradient-to-r before:from-cyan-400 before:to-blue-400 before:opacity-0 hover:before:opacity-20 before:transition-opacity'
+            }`}
+          >
+            <span className="relative z-10 flex items-center gap-2">
+              {isUploading ? (
+                <div className="w-2 h-2 rounded-full bg-white animate-pulse"></div>
+              ) : (
+                <span className="w-2 h-2 rounded-full bg-cyan-300"></span>
+              )}
+              {isUploading ? 'UPLOADING...' : 'CAMERA'}
+            </span>
+          </button>
+          
+          {/* 隠しファイル入力 */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+          
           {/* デモモードボタン */}
           <button
             onClick={startDemoMode}
@@ -880,6 +1136,14 @@ export function MapView({ userId }: MapViewProps) {
               <span className="text-yellow-400">{pendingCount}</span>
             </div>
           </div>
+          
+          {/* さりげないローディングアイコン */}
+          {isUploading && (
+            <div className="flex items-center gap-2 px-4 py-3 bg-slate-800 rounded-xl border border-slate-600">
+              <div className="w-4 h-4 border-2 border-cyan-300 border-t-transparent rounded-full animate-spin"></div>
+              <span className="text-cyan-300 font-mono text-sm">📷</span>
+            </div>
+          )}
           
         </div>
       </div>
@@ -912,6 +1176,36 @@ export function MapView({ userId }: MapViewProps) {
           <Marker position={currentPosition} icon={createEmojiIcon()} />
         )}
         
+        {/* 写真マーカー */}
+        {photos.map((photo) => (
+          <Marker
+            key={photo.id}
+            position={[photo.location.lat, photo.location.lng]}
+            icon={createPhotoIcon()}
+          >
+            <Popup maxWidth={180} className="photo-popup">
+              <div className="text-center w-full">
+                <img 
+                  src={photo.thumbnailUrl || photo.imageUrl} 
+                  alt={photo.caption || '写真'}
+                  className="w-full max-w-[150px] h-auto object-cover rounded mb-2 cursor-pointer hover:opacity-80 transition-opacity"
+                  onClick={() => window.open(photo.imageUrl, '_blank')}
+                  title="クリックで別タブに拡大表示"
+                />
+                {photo.caption && (
+                  <p className="text-xs text-gray-700 mb-1 break-words">{photo.caption}</p>
+                )}
+                <p className="text-xs text-gray-500 mb-1">
+                  {photo.timestamp.toLocaleDateString()}
+                </p>
+                <p className="text-xs text-gray-500 mb-1">
+                  {photo.timestamp.toLocaleTimeString()}
+                </p>
+                <p className="text-xs text-blue-500">📱 タップで拡大</p>
+              </div>
+            </Popup>
+          </Marker>
+        ))}
         
         {currentTrackPositions.length > 0 && (
           <Polyline 
@@ -933,6 +1227,8 @@ export function MapView({ userId }: MapViewProps) {
       </MapContainer>
       
       </div>
+
+
     </div>
   );
 }
