@@ -176,7 +176,7 @@ function App() {
             }}
           >
             {/* スキャンライン効果 */}
-            <div 
+            <div
               style={{
                 position: 'absolute',
                 top: '0',
@@ -186,13 +186,13 @@ function App() {
                 background: 'linear-gradient(to right, transparent, #67e8f9, transparent)',
                 opacity: '0',
                 transform: 'translateX(-100%)',
-                transition: 'all 1s ease-out'
+                transition: 'all 1s ease-out',
               }}
               className="group-hover:opacity-20 group-hover:translate-x-full"
             ></div>
 
             {/* 四隅のアクセント */}
-            <div 
+            <div
               style={{
                 position: 'absolute',
                 top: '0',
@@ -202,10 +202,10 @@ function App() {
                 borderLeft: '2px solid #67e8f9',
                 borderTop: '2px solid #67e8f9',
                 opacity: '0.7',
-                transition: 'all 0.3s'
+                transition: 'all 0.3s',
               }}
             ></div>
-            <div 
+            <div
               style={{
                 position: 'absolute',
                 top: '0',
@@ -215,10 +215,10 @@ function App() {
                 borderRight: '2px solid #67e8f9',
                 borderTop: '2px solid #67e8f9',
                 opacity: '0.7',
-                transition: 'all 0.3s'
+                transition: 'all 0.3s',
               }}
             ></div>
-            <div 
+            <div
               style={{
                 position: 'absolute',
                 bottom: '0',
@@ -228,10 +228,10 @@ function App() {
                 borderLeft: '2px solid #67e8f9',
                 borderBottom: '2px solid #67e8f9',
                 opacity: '0.7',
-                transition: 'all 0.3s'
+                transition: 'all 0.3s',
               }}
             ></div>
-            <div 
+            <div
               style={{
                 position: 'absolute',
                 bottom: '0',
@@ -241,7 +241,7 @@ function App() {
                 borderRight: '2px solid #67e8f9',
                 borderBottom: '2px solid #67e8f9',
                 opacity: '0.7',
-                transition: 'all 0.3s'
+                transition: 'all 0.3s',
               }}
             ></div>
 
