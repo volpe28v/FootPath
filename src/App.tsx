@@ -109,61 +109,69 @@ function App() {
 
         <div className="text-center relative z-10">
           <h1
-            className="text-6xl font-bold mb-6 font-mono text-cyan-400"
+            className="text-6xl font-bold mb-8 font-mono text-cyan-400"
             style={{
               textShadow: '0 0 10px #00ffff, 0 0 20px #00ffff, 0 0 30px #00ffff',
-              lineHeight: '1.3',
+              lineHeight: '1.2',
             }}
           >
             FOOTPATH
           </h1>
 
           <div
-            className="text-cyan-400 text-lg font-mono mb-12 tracking-wider"
+            className="text-cyan-400 text-lg font-mono mb-20 tracking-wider"
             style={{
               textShadow: '0 0 5px #00ffff',
-              lineHeight: '1.5',
+              lineHeight: '1.6',
             }}
           >
             &gt; GPS TRACKING SYSTEM
           </div>
+
           <button
             onClick={handleLogin}
-            className="group relative px-16 py-4 font-mono font-bold text-xl uppercase tracking-[0.3em] bg-transparent border-2 border-cyan-400 text-cyan-400 hover:text-slate-900 transition-all duration-500 transform hover:scale-105 active:scale-95 overflow-hidden"
+            className="group relative font-mono font-bold text-2xl uppercase tracking-[0.3em] bg-transparent border-2 border-cyan-400 text-cyan-400 hover:text-slate-900 transition-all duration-500 transform hover:scale-110 active:scale-95 overflow-hidden shadow-2xl"
             style={{
-              background: 'rgba(0, 255, 255, 0.1)',
+              padding: '12px 24px',
+              marginTop: '20px',
+              background: 'rgba(0, 255, 255, 0.15)',
               boxShadow: `
-                0 0 20px rgba(0, 255, 255, 0.5),
-                inset 0 0 20px rgba(0, 255, 255, 0.2)
+                0 0 30px rgba(0, 255, 255, 0.6),
+                0 0 60px rgba(0, 255, 255, 0.3),
+                inset 0 0 30px rgba(0, 255, 255, 0.2)
               `,
-              textShadow: '0 0 10px #00ffff, 0 0 20px #00ffff',
+              textShadow: '0 0 15px #00ffff, 0 0 30px #00ffff',
+              borderRadius: '4px',
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = 'linear-gradient(45deg, #00ffff, #67e8f9)';
               e.currentTarget.style.boxShadow = `
-                0 0 40px rgba(0, 255, 255, 0.8),
-                0 0 80px rgba(0, 255, 255, 0.4),
-                inset 0 0 40px rgba(255, 255, 255, 0.2)
+                0 0 50px rgba(0, 255, 255, 0.9),
+                0 0 100px rgba(0, 255, 255, 0.5),
+                inset 0 0 50px rgba(255, 255, 255, 0.3)
               `;
-              e.currentTarget.style.textShadow = '0 0 5px rgba(0, 0, 0, 0.8)';
+              e.currentTarget.style.textShadow = '0 0 10px rgba(0, 0, 0, 0.8)';
+              e.currentTarget.style.transform = 'scale(1.12)';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'rgba(0, 255, 255, 0.1)';
+              e.currentTarget.style.background = 'rgba(0, 255, 255, 0.15)';
               e.currentTarget.style.boxShadow = `
-                0 0 20px rgba(0, 255, 255, 0.5),
-                inset 0 0 20px rgba(0, 255, 255, 0.2)
+                0 0 30px rgba(0, 255, 255, 0.6),
+                0 0 60px rgba(0, 255, 255, 0.3),
+                inset 0 0 30px rgba(0, 255, 255, 0.2)
               `;
-              e.currentTarget.style.textShadow = '0 0 10px #00ffff, 0 0 20px #00ffff';
+              e.currentTarget.style.textShadow = '0 0 15px #00ffff, 0 0 30px #00ffff';
+              e.currentTarget.style.transform = 'scale(1)';
             }}
           >
             {/* スキャンライン効果 */}
             <div className="absolute inset-0 bg-gradient-to-r from-transparent via-cyan-300 to-transparent opacity-0 group-hover:opacity-20 transform -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out"></div>
 
             {/* 四隅のアクセント */}
-            <div className="absolute top-0 left-0 w-4 h-4 border-l-2 border-t-2 border-cyan-300 opacity-60 group-hover:opacity-100 transition-opacity duration-300"></div>
-            <div className="absolute top-0 right-0 w-4 h-4 border-r-2 border-t-2 border-cyan-300 opacity-60 group-hover:opacity-100 transition-opacity duration-300"></div>
-            <div className="absolute bottom-0 left-0 w-4 h-4 border-l-2 border-b-2 border-cyan-300 opacity-60 group-hover:opacity-100 transition-opacity duration-300"></div>
-            <div className="absolute bottom-0 right-0 w-4 h-4 border-r-2 border-b-2 border-cyan-300 opacity-60 group-hover:opacity-100 transition-opacity duration-300"></div>
+            <div className="absolute top-0 left-0 w-6 h-6 border-l-2 border-t-2 border-cyan-300 opacity-70 group-hover:opacity-100 transition-all duration-300"></div>
+            <div className="absolute top-0 right-0 w-6 h-6 border-r-2 border-t-2 border-cyan-300 opacity-70 group-hover:opacity-100 transition-all duration-300"></div>
+            <div className="absolute bottom-0 left-0 w-6 h-6 border-l-2 border-b-2 border-cyan-300 opacity-70 group-hover:opacity-100 transition-all duration-300"></div>
+            <div className="absolute bottom-0 right-0 w-6 h-6 border-r-2 border-b-2 border-cyan-300 opacity-70 group-hover:opacity-100 transition-all duration-300"></div>
 
             {/* メインテキスト */}
             <span className="relative z-10 block">GOOGLE LOGIN</span>
