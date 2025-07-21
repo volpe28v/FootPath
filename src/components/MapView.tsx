@@ -114,6 +114,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
   const [totalPointsCount, setTotalPointsCount] = useState(0);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [lastLocationUpdate, setLastLocationUpdate] = useState<Date | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const batchIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastPositionRef = useRef<{ lat: number; lng: number; timestamp: number } | null>(null);
@@ -357,6 +358,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
 
                 setCurrentPosition([newLat, newLng]);
                 lastPositionRef.current = { lat: newLat, lng: newLng, timestamp: now };
+                setLastLocationUpdate(new Date());
 
                 pendingPointsRef.current.push(newPoint);
                 setPendingCount(pendingPointsRef.current.length);
@@ -417,7 +419,8 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && trackingSession?.isActive && !isTracking) {
-        // アクティブ復帰時に記録が停止していたら自動再開
+        // フォアグラウンド復帰時に記録が停止していたら自動再開
+        console.log('App returned to foreground - resuming tracking');
         setIsTracking(true);
 
         // 位置情報監視を再開
@@ -452,6 +455,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
 
               setCurrentPosition([newLat, newLng]);
               lastPositionRef.current = { lat: newLat, lng: newLng, timestamp: now };
+              setLastLocationUpdate(new Date());
 
               pendingPointsRef.current.push(newPoint);
               setPendingCount(pendingPointsRef.current.length);
@@ -487,6 +491,26 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
               timeout: 10000,
             }
           );
+        }
+      } else if (document.visibilityState === 'hidden' && isTracking) {
+        // バックグラウンド時の処理 - リソース節約のため位置情報監視とタイマーを停止
+        console.log('App moved to background - pausing tracking resources');
+
+        // バッチ処理タイマーを停止
+        if (batchIntervalRef.current) {
+          clearInterval(batchIntervalRef.current);
+          batchIntervalRef.current = null;
+        }
+
+        // 位置情報監視を停止
+        if (watchIdRef.current !== null) {
+          navigator.geolocation.clearWatch(watchIdRef.current);
+          watchIdRef.current = null;
+        }
+
+        // pending pointsがあれば最後に一度フラッシュ
+        if (trackingSession && pendingPointsRef.current.length > 0) {
+          flushPendingPoints(trackingSession.id);
         }
       }
     };
@@ -723,6 +747,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
           if (!validatePosition(position)) {
             const tokyoStation: LatLngExpression = [35.6812, 139.7671];
             setCurrentPosition(tokyoStation);
+            setLastLocationUpdate(new Date()); // フォールバック位置でも日時を設定
             return;
           }
 
@@ -733,6 +758,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
             lng: position.coords.longitude,
             timestamp: Date.now(),
           };
+          setLastLocationUpdate(new Date());
 
           // 自動記録開始チェック
           const hasVisited = localStorage.getItem('footpath_visited');
@@ -754,6 +780,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
           // エラー時は東京駅の座標を設定
           const tokyoStation: LatLngExpression = [35.6812, 139.7671];
           setCurrentPosition(tokyoStation);
+          setLastLocationUpdate(new Date()); // エラー時のフォールバック位置でも日時を設定
         },
         {
           enableHighAccuracy: false, // モバイルでの精度を下げて成功率向上
@@ -763,6 +790,10 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
       );
     } else {
       alert('お使いのブラウザは位置情報をサポートしていません');
+      // 位置情報をサポートしていない場合は東京駅を設定
+      const tokyoStation: LatLngExpression = [35.6812, 139.7671];
+      setCurrentPosition(tokyoStation);
+      setLastLocationUpdate(new Date()); // 非サポート時でも日時を設定
     }
   }, []);
 
@@ -827,6 +858,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
         // 現在位置更新（UI用）
         setCurrentPosition([newLat, newLng]);
         lastPositionRef.current = { lat: newLat, lng: newLng, timestamp: now };
+        setLastLocationUpdate(new Date());
 
         // ペンディングキューに追加（Firestore更新は後でバッチ処理）
         pendingPointsRef.current.push(newPoint);
@@ -1179,53 +1211,6 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
           style={{ display: 'none' }}
         />
 
-        {/* リフレッシュボタン */}
-        <button
-          onClick={() => {
-            loadSessionData(true);
-            loadPhotoData(true);
-          }}
-          style={{
-            position: 'relative',
-            padding: '8px 12px',
-            borderRadius: '8px',
-            fontFamily: 'monospace',
-            fontWeight: 'bold',
-            fontSize: '12px',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            transition: 'all 0.2s ease',
-            background: 'linear-gradient(to right, #475569, #334155)',
-            color: '#ffffff',
-            border: 'none',
-            cursor: 'pointer',
-            boxShadow: '0 4px 6px -1px rgba(71, 85, 105, 0.2)',
-            height: '32px',
-            display: 'flex',
-            alignItems: 'center',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'scale(1.02)';
-            e.currentTarget.style.background = 'linear-gradient(to right, #64748b, #475569)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'scale(1)';
-            e.currentTarget.style.background = 'linear-gradient(to right, #475569, #334155)';
-          }}
-        >
-          <span
-            style={{
-              position: 'relative',
-              zIndex: 10,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-            }}
-          >
-            <span style={{ fontSize: '18px' }}>🔄</span>
-          </span>
-        </button>
-
         {/* データ数表示 */}
         <div
           style={{
@@ -1266,6 +1251,55 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
             </span>
             <span style={{ color: '#94a3b8' }}>:</span>
             <span style={{ color: '#67e8f9' }}>{pendingCount}</span>
+          </div>
+        </div>
+
+        {/* 位置情報取得日時表示 */}
+        <div
+          style={{
+            backgroundColor: '#1e293b',
+            border: '1px solid #475569',
+            borderRadius: '8px',
+            padding: '0 8px',
+            fontFamily: 'monospace',
+            fontWeight: 'bold',
+            fontSize: '11px',
+            position: 'relative',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+            height: '32px',
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              inset: '0',
+              background: lastLocationUpdate
+                ? 'linear-gradient(to right, rgba(34, 197, 94, 0.1), rgba(16, 185, 129, 0.1))'
+                : 'linear-gradient(to right, rgba(107, 114, 128, 0.1), rgba(75, 85, 99, 0.1))',
+              borderRadius: '8px',
+            }}
+          ></div>
+          <div
+            style={{
+              position: 'relative',
+              zIndex: 10,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+            }}
+          >
+            <span style={{ fontSize: '10px' }}>📍</span>
+            <span style={{ color: '#ffffff' }}>
+              {lastLocationUpdate
+                ? lastLocationUpdate.toLocaleTimeString('ja-JP', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                  })
+                : '--:--:--'}
+            </span>
           </div>
         </div>
 
