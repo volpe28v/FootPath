@@ -130,11 +130,18 @@ function App() {
 
           <button
             onClick={handleLogin}
-            className="group relative font-mono font-bold text-2xl uppercase tracking-[0.3em] bg-transparent border-2 border-cyan-400 text-cyan-400 hover:text-slate-900 transition-all duration-500 transform hover:scale-110 active:scale-95 overflow-hidden shadow-2xl"
+            className="group relative overflow-hidden"
             style={{
-              padding: '12px 24px',
+              fontFamily: 'monospace',
+              fontWeight: 'bold',
+              fontSize: '12px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.15em',
+              padding: '6px 12px',
               marginTop: '20px',
-              background: 'rgba(0, 255, 255, 0.15)',
+              background: 'rgba(0, 255, 255, 0.15) !important',
+              border: '2px solid #00ffff !important',
+              color: '#00ffff !important',
               boxShadow: `
                 0 0 30px rgba(0, 255, 255, 0.6),
                 0 0 60px rgba(0, 255, 255, 0.3),
@@ -142,9 +149,12 @@ function App() {
               `,
               textShadow: '0 0 15px #00ffff, 0 0 30px #00ffff',
               borderRadius: '4px',
+              transition: 'all 0.5s',
+              transform: 'scale(1)',
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = 'linear-gradient(45deg, #00ffff, #67e8f9)';
+              e.currentTarget.style.color = '#1e293b';
               e.currentTarget.style.boxShadow = `
                 0 0 50px rgba(0, 255, 255, 0.9),
                 0 0 100px rgba(0, 255, 255, 0.5),
@@ -155,6 +165,7 @@ function App() {
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = 'rgba(0, 255, 255, 0.15)';
+              e.currentTarget.style.color = '#00ffff';
               e.currentTarget.style.boxShadow = `
                 0 0 30px rgba(0, 255, 255, 0.6),
                 0 0 60px rgba(0, 255, 255, 0.3),
@@ -165,16 +176,77 @@ function App() {
             }}
           >
             {/* スキャンライン効果 */}
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-cyan-300 to-transparent opacity-0 group-hover:opacity-20 transform -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out"></div>
+            <div 
+              style={{
+                position: 'absolute',
+                top: '0',
+                left: '0',
+                right: '0',
+                bottom: '0',
+                background: 'linear-gradient(to right, transparent, #67e8f9, transparent)',
+                opacity: '0',
+                transform: 'translateX(-100%)',
+                transition: 'all 1s ease-out'
+              }}
+              className="group-hover:opacity-20 group-hover:translate-x-full"
+            ></div>
 
             {/* 四隅のアクセント */}
-            <div className="absolute top-0 left-0 w-6 h-6 border-l-2 border-t-2 border-cyan-300 opacity-70 group-hover:opacity-100 transition-all duration-300"></div>
-            <div className="absolute top-0 right-0 w-6 h-6 border-r-2 border-t-2 border-cyan-300 opacity-70 group-hover:opacity-100 transition-all duration-300"></div>
-            <div className="absolute bottom-0 left-0 w-6 h-6 border-l-2 border-b-2 border-cyan-300 opacity-70 group-hover:opacity-100 transition-all duration-300"></div>
-            <div className="absolute bottom-0 right-0 w-6 h-6 border-r-2 border-b-2 border-cyan-300 opacity-70 group-hover:opacity-100 transition-all duration-300"></div>
+            <div 
+              style={{
+                position: 'absolute',
+                top: '0',
+                left: '0',
+                width: '12px',
+                height: '12px',
+                borderLeft: '2px solid #67e8f9',
+                borderTop: '2px solid #67e8f9',
+                opacity: '0.7',
+                transition: 'all 0.3s'
+              }}
+            ></div>
+            <div 
+              style={{
+                position: 'absolute',
+                top: '0',
+                right: '0',
+                width: '12px',
+                height: '12px',
+                borderRight: '2px solid #67e8f9',
+                borderTop: '2px solid #67e8f9',
+                opacity: '0.7',
+                transition: 'all 0.3s'
+              }}
+            ></div>
+            <div 
+              style={{
+                position: 'absolute',
+                bottom: '0',
+                left: '0',
+                width: '12px',
+                height: '12px',
+                borderLeft: '2px solid #67e8f9',
+                borderBottom: '2px solid #67e8f9',
+                opacity: '0.7',
+                transition: 'all 0.3s'
+              }}
+            ></div>
+            <div 
+              style={{
+                position: 'absolute',
+                bottom: '0',
+                right: '0',
+                width: '12px',
+                height: '12px',
+                borderRight: '2px solid #67e8f9',
+                borderBottom: '2px solid #67e8f9',
+                opacity: '0.7',
+                transition: 'all 0.3s'
+              }}
+            ></div>
 
             {/* メインテキスト */}
-            <span className="relative z-10 block">GOOGLE LOGIN</span>
+            <span style={{ position: 'relative', zIndex: 10, display: 'block' }}>GOOGLE LOGIN</span>
           </button>
         </div>
       </div>
