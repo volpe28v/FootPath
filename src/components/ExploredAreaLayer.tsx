@@ -26,11 +26,12 @@ export function ExploredAreaLayer({ exploredAreas, isVisible }: ExploredAreaLaye
           return Date.now();
         };
 
+        const timestamp = getTimestamp(area.timestamp);
+        
         return (
-          <>
+          <div key={`explored-area-${index}-${timestamp}`}>
             {/* 最外層 - 最も薄い */}
             <Circle
-              key={`explored-layer1-${index}-${getTimestamp(area.timestamp)}`}
               center={[area.lat, area.lng]}
               radius={area.radius + 20}
               pathOptions={{
@@ -43,7 +44,6 @@ export function ExploredAreaLayer({ exploredAreas, isVisible }: ExploredAreaLaye
             />
             {/* 外層2 */}
             <Circle
-              key={`explored-layer2-${index}-${getTimestamp(area.timestamp)}`}
               center={[area.lat, area.lng]}
               radius={area.radius + 15}
               pathOptions={{
@@ -56,7 +56,6 @@ export function ExploredAreaLayer({ exploredAreas, isVisible }: ExploredAreaLaye
             />
             {/* 外層3 */}
             <Circle
-              key={`explored-layer3-${index}-${getTimestamp(area.timestamp)}`}
               center={[area.lat, area.lng]}
               radius={area.radius + 12}
               pathOptions={{
@@ -69,7 +68,6 @@ export function ExploredAreaLayer({ exploredAreas, isVisible }: ExploredAreaLaye
             />
             {/* 中間層4 */}
             <Circle
-              key={`explored-layer4-${index}-${getTimestamp(area.timestamp)}`}
               center={[area.lat, area.lng]}
               radius={area.radius + 8}
               pathOptions={{
@@ -82,7 +80,6 @@ export function ExploredAreaLayer({ exploredAreas, isVisible }: ExploredAreaLaye
             />
             {/* 中間層5 */}
             <Circle
-              key={`explored-layer5-${index}-${getTimestamp(area.timestamp)}`}
               center={[area.lat, area.lng]}
               radius={area.radius + 5}
               pathOptions={{
@@ -95,7 +92,6 @@ export function ExploredAreaLayer({ exploredAreas, isVisible }: ExploredAreaLaye
             />
             {/* メインの円 */}
             <Circle
-              key={`explored-${index}-${getTimestamp(area.timestamp)}`}
               center={[area.lat, area.lng]}
               radius={area.radius}
               pathOptions={{
@@ -106,7 +102,7 @@ export function ExploredAreaLayer({ exploredAreas, isVisible }: ExploredAreaLaye
                 opacity: 0,
               }}
             />
-          </>
+          </div>
         );
       })}
     </>
