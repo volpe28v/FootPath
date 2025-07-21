@@ -420,10 +420,15 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
   // ページ終了時のクリーンアップとvisibility管理
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && trackingSession?.isActive && !isTracking) {
-        // フォアグラウンド復帰時に記録が停止していたら自動再開
-        console.log('App returned to foreground - resuming tracking');
-        setIsTracking(true);
+      if (document.visibilityState === 'visible' && trackingSession?.isActive && isTracking) {
+        // フォアグラウンド復帰時、記録中なら位置情報監視を再開
+        console.log('App returned to foreground - resuming position watching');
+        
+        // watchIdが既に存在する場合は一旦クリア
+        if (watchIdRef.current !== null) {
+          navigator.geolocation.clearWatch(watchIdRef.current);
+          watchIdRef.current = null;
+        }
 
         // 位置情報監視を再開
         if (navigator.geolocation && trackingSession) {
