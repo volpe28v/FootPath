@@ -342,6 +342,9 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
           if (navigator.geolocation) {
             watchIdRef.current = navigator.geolocation.watchPosition(
               (position) => {
+                // 位置情報取得処理のタイミングで時間を更新
+                setLastLocationUpdate(new Date());
+
                 if (!validatePosition(position)) return;
 
                 const newLat = position.coords.latitude;
@@ -358,7 +361,6 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
 
                 setCurrentPosition([newLat, newLng]);
                 lastPositionRef.current = { lat: newLat, lng: newLng, timestamp: now };
-                setLastLocationUpdate(new Date());
 
                 pendingPointsRef.current.push(newPoint);
                 setPendingCount(pendingPointsRef.current.length);
@@ -439,6 +441,9 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
           // 位置情報監視開始
           watchIdRef.current = navigator.geolocation.watchPosition(
             (position) => {
+              // 位置情報取得処理のタイミングで時間を更新
+              setLastLocationUpdate(new Date());
+
               if (!validatePosition(position)) return;
 
               const newLat = position.coords.latitude;
@@ -455,7 +460,6 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
 
               setCurrentPosition([newLat, newLng]);
               lastPositionRef.current = { lat: newLat, lng: newLng, timestamp: now };
-              setLastLocationUpdate(new Date());
 
               pendingPointsRef.current.push(newPoint);
               setPendingCount(pendingPointsRef.current.length);
@@ -834,6 +838,9 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       (position) => {
+        // 位置情報取得処理のタイミングで時間を更新
+        setLastLocationUpdate(new Date());
+
         // 位置情報の妥当性チェック
         if (!validatePosition(position)) {
           return;
@@ -858,7 +865,6 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
         // 現在位置更新（UI用）
         setCurrentPosition([newLat, newLng]);
         lastPositionRef.current = { lat: newLat, lng: newLng, timestamp: now };
-        setLastLocationUpdate(new Date());
 
         // ペンディングキューに追加（Firestore更新は後でバッチ処理）
         pendingPointsRef.current.push(newPoint);
@@ -1073,7 +1079,16 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
   };
 
   return (
-    <div className="relative h-screen w-full flex flex-col bg-slate-900">
+    <div
+      style={{
+        position: 'relative',
+        height: '100vh',
+        width: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        background: '#0f172a',
+      }}
+    >
       {/* ヘッダー部分 */}
       <div
         style={{
