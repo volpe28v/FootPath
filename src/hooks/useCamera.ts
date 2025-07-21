@@ -12,16 +12,19 @@ export function useCamera(options: UseCameraOptions = {}) {
     facingMode = 'environment', // デフォルトは背面カメラ
     maxWidth = 1920,
     maxHeight = 1080,
-    quality = 0.8
+    quality = 0.8,
   } = options;
 
   const [isSupported] = useState(() => {
     const hasMediaDevices = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-    const isSecureContext = window.isSecureContext || window.location.protocol === 'https:' || window.location.hostname === 'localhost';
+    const isSecureContext =
+      window.isSecureContext ||
+      window.location.protocol === 'https:' ||
+      window.location.hostname === 'localhost';
     console.log('Camera support check:', { hasMediaDevices, isSecureContext });
     return hasMediaDevices && isSecureContext;
   });
-  
+
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -34,7 +37,7 @@ export function useCamera(options: UseCameraOptions = {}) {
     console.log('getUserMedia:', !!navigator.mediaDevices?.getUserMedia);
     console.log('location protocol:', window.location.protocol);
     console.log('location hostname:', window.location.hostname);
-    
+
     if (!isSupported) {
       setError('カメラがサポートされていません');
       return;
@@ -50,17 +53,17 @@ export function useCamera(options: UseCameraOptions = {}) {
         video: {
           facingMode: { ideal: facingMode },
           width: { max: maxWidth },
-          height: { max: maxHeight }
-        }
+          height: { max: maxHeight },
+        },
       };
-      
+
       console.log('Camera constraints:', constraints);
       const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
 
       console.log('Camera stream obtained:', mediaStream);
       console.log('Stream tracks:', mediaStream.getTracks());
       setStream(mediaStream);
-      
+
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
         console.log('Video element set');
@@ -70,13 +73,17 @@ export function useCamera(options: UseCameraOptions = {}) {
       if (err instanceof Error) {
         console.error('Error name:', err.name);
         console.error('Error message:', err.message);
-        
+
         if (err.name === 'NotAllowedError') {
-          setError('カメラへのアクセスが拒否されました。ブラウザの設定でカメラの許可を確認してください。');
+          setError(
+            'カメラへのアクセスが拒否されました。ブラウザの設定でカメラの許可を確認してください。'
+          );
         } else if (err.name === 'NotFoundError') {
           setError('カメラが見つかりません。デバイスにカメラが接続されているか確認してください。');
         } else if (err.name === 'NotReadableError') {
-          setError('カメラにアクセスできません。他のアプリがカメラを使用している可能性があります。');
+          setError(
+            'カメラにアクセスできません。他のアプリがカメラを使用している可能性があります。'
+          );
         } else if (err.name === 'OverconstrainedError') {
           setError('カメラの設定に問題があります。デバイスがサポートしていない設定です。');
         } else if (err.name === 'SecurityError') {
@@ -95,7 +102,7 @@ export function useCamera(options: UseCameraOptions = {}) {
   // カメラを停止
   const stopCamera = useCallback(() => {
     if (stream) {
-      stream.getTracks().forEach(track => track.stop());
+      stream.getTracks().forEach((track) => track.stop());
       setStream(null);
     }
     if (videoRef.current) {
@@ -113,7 +120,7 @@ export function useCamera(options: UseCameraOptions = {}) {
     const video = videoRef.current;
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
-    
+
     if (!context) {
       setError('Canvas contextの取得に失敗しました');
       return null;
@@ -145,11 +152,7 @@ export function useCamera(options: UseCameraOptions = {}) {
 
     // Blobに変換
     return new Promise((resolve) => {
-      canvas.toBlob(
-        (blob) => resolve(blob),
-        'image/jpeg',
-        quality
-      );
+      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
     });
   }, [stream, maxWidth, maxHeight, quality]);
 
@@ -169,6 +172,6 @@ export function useCamera(options: UseCameraOptions = {}) {
     startCamera,
     stopCamera,
     takePhoto,
-    switchCamera
+    switchCamera,
   };
 }

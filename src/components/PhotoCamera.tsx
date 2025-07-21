@@ -10,15 +10,8 @@ interface PhotoCameraProps {
 }
 
 export function PhotoCamera({ isOpen, onClose, onPhotoTaken, currentLocation }: PhotoCameraProps) {
-  const { 
-    isSupported, 
-    isLoading, 
-    error, 
-    videoRef, 
-    startCamera, 
-    stopCamera, 
-    takePhoto 
-  } = useCamera();
+  const { isSupported, isLoading, error, videoRef, startCamera, stopCamera, takePhoto } =
+    useCamera();
 
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [capturedPhoto, setCapturedPhoto] = useState<Blob | null>(null);
@@ -33,7 +26,7 @@ export function PhotoCamera({ isOpen, onClose, onPhotoTaken, currentLocation }: 
       console.log('Stopping camera...');
       stopCamera();
     };
-  }, [isOpen, isSupported]);
+  }, [isOpen, isSupported, startCamera, stopCamera]);
 
   const handleTakePhoto = async () => {
     const photo = await takePhoto();
@@ -71,12 +64,12 @@ export function PhotoCamera({ isOpen, onClose, onPhotoTaken, currentLocation }: 
   };
 
   console.log('PhotoCamera render - isOpen:', isOpen);
-  
+
   if (!isOpen) {
     console.log('PhotoCamera returning null (not open)');
     return null;
   }
-  
+
   console.log('PhotoCamera rendering full component');
 
   return (
@@ -89,7 +82,12 @@ export function PhotoCamera({ isOpen, onClose, onPhotoTaken, currentLocation }: 
             className="text-white p-2 rounded-full hover:bg-white/20 transition-colors"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
           <span className="text-white font-mono text-sm">
@@ -121,9 +119,9 @@ export function PhotoCamera({ isOpen, onClose, onPhotoTaken, currentLocation }: 
             <p className="text-cyan-400 font-mono animate-pulse">LOADING CAMERA...</p>
           </div>
         ) : photoPreview ? (
-          <img 
-            src={photoPreview} 
-            alt="撮影した写真" 
+          <img
+            src={photoPreview}
+            alt="撮影した写真"
             className="max-w-full max-h-full object-contain"
           />
         ) : (

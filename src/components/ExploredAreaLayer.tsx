@@ -14,9 +14,15 @@ export function ExploredAreaLayer({ exploredAreas, isVisible }: ExploredAreaLaye
       {exploredAreas.map((area, index) => {
         // timestampの型を安全に処理
         const getTimestamp = (timestamp: unknown): number => {
-          if (timestamp && typeof (timestamp as { getTime?: () => number }).getTime === 'function') {
+          if (
+            timestamp &&
+            typeof (timestamp as { getTime?: () => number }).getTime === 'function'
+          ) {
             return (timestamp as { getTime: () => number }).getTime();
-          } else if (timestamp && typeof (timestamp as { toDate?: () => Date }).toDate === 'function') {
+          } else if (
+            timestamp &&
+            typeof (timestamp as { toDate?: () => Date }).toDate === 'function'
+          ) {
             // Firestore Timestamp
             return (timestamp as { toDate: () => Date }).toDate().getTime();
           } else if (timestamp && typeof (timestamp as { seconds?: number }).seconds === 'number') {
@@ -27,7 +33,7 @@ export function ExploredAreaLayer({ exploredAreas, isVisible }: ExploredAreaLaye
         };
 
         const timestamp = getTimestamp(area.timestamp);
-        
+
         return (
           <div key={`explored-area-${index}-${timestamp}`}>
             {/* 最外層 - 最も薄い */}
