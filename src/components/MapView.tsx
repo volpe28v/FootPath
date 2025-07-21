@@ -255,6 +255,98 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
     return distance >= optimizationSettings.minDistance;
   };
 
+  // 位置情報エラーハンドリングの共通関数
+  const handleGeolocationError = useCallback((error: GeolocationPositionError) => {
+    let errorDetails = '';
+    switch (error.code) {
+      case 1:
+        errorDetails = 'PERMISSION_DENIED: トラッキング中に位置情報の使用が拒否されました';
+        break;
+      case 2:
+        errorDetails = 'POSITION_UNAVAILABLE: トラッキング中に位置情報を取得できませんでした';
+        break;
+      case 3:
+        errorDetails = 'TIMEOUT: トラッキング中に位置情報の取得がタイムアウトしました';
+        break;
+      default:
+        errorDetails = `Unknown tracking error (code: ${error.code})`;
+    }
+    alert(`位置情報のトラッキング中にエラーが発生しました:\n${errorDetails}`);
+  }, []);
+
+  // 位置情報取得成功時の共通処理
+  const handlePositionUpdate = useCallback(
+    (position: GeolocationPosition) => {
+      // 位置情報取得処理のタイミングで時間を更新
+      setLastLocationUpdate(new Date());
+
+      if (!validatePosition(position)) return;
+
+      const newLat = position.coords.latitude;
+      const newLng = position.coords.longitude;
+      const now = Date.now();
+
+      if (!shouldUpdatePosition(newLat, newLng)) return;
+
+      const newPoint: GeoPoint = {
+        lat: newLat,
+        lng: newLng,
+        timestamp: new Date(),
+      };
+
+      setCurrentPosition([newLat, newLng]);
+      lastPositionRef.current = { lat: newLat, lng: newLng, timestamp: now };
+
+      pendingPointsRef.current.push(newPoint);
+      setPendingCount(pendingPointsRef.current.length);
+
+      setTrackingSession((prev) => {
+        if (!prev) return null;
+        return { ...prev, points: [...prev.points, newPoint] };
+      });
+    },
+    [validatePosition, shouldUpdatePosition]
+  );
+
+  // 位置情報監視開始の共通関数
+  const startLocationWatching = useCallback(
+    (sessionId: string) => {
+      // 既存の監視をクリア
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+
+      // バッチ処理タイマー開始
+      if (batchIntervalRef.current) {
+        clearInterval(batchIntervalRef.current);
+      }
+
+      batchIntervalRef.current = setInterval(() => {
+        flushPendingPoints(sessionId);
+      }, optimizationSettings.batchInterval);
+
+      // 位置情報監視開始
+      if (navigator.geolocation) {
+        watchIdRef.current = navigator.geolocation.watchPosition(
+          handlePositionUpdate,
+          handleGeolocationError,
+          {
+            enableHighAccuracy: false,
+            maximumAge: 30000,
+            timeout: 10000,
+          }
+        );
+      }
+    },
+    [
+      handlePositionUpdate,
+      handleGeolocationError,
+      flushPendingPoints,
+      optimizationSettings.batchInterval,
+    ]
+  );
+
   // 現在のトラッキングセッションの軌跡から探索エリアを更新
   useEffect(() => {
     if (trackingSession && trackingSession.points.length > 0) {
@@ -327,76 +419,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
           setIsTracking(true);
 
           // 位置情報監視を再開
-          const sessionId = sessionToResume.id;
-
-          // バッチ処理タイマー開始
-          if (batchIntervalRef.current) {
-            clearInterval(batchIntervalRef.current);
-          }
-
-          batchIntervalRef.current = setInterval(() => {
-            flushPendingPoints(sessionId);
-          }, optimizationSettings.batchInterval);
-
-          // 位置情報監視開始
-          if (navigator.geolocation) {
-            watchIdRef.current = navigator.geolocation.watchPosition(
-              (position) => {
-                // 位置情報取得処理のタイミングで時間を更新
-                setLastLocationUpdate(new Date());
-
-                if (!validatePosition(position)) return;
-
-                const newLat = position.coords.latitude;
-                const newLng = position.coords.longitude;
-                const now = Date.now();
-
-                if (!shouldUpdatePosition(newLat, newLng)) return;
-
-                const newPoint: GeoPoint = {
-                  lat: newLat,
-                  lng: newLng,
-                  timestamp: new Date(),
-                };
-
-                setCurrentPosition([newLat, newLng]);
-                lastPositionRef.current = { lat: newLat, lng: newLng, timestamp: now };
-
-                pendingPointsRef.current.push(newPoint);
-                setPendingCount(pendingPointsRef.current.length);
-
-                setTrackingSession((prev) => {
-                  if (!prev) return null;
-                  return { ...prev, points: [...prev.points, newPoint] };
-                });
-              },
-              (error) => {
-                let errorDetails = '';
-                switch (error.code) {
-                  case 1:
-                    errorDetails =
-                      'PERMISSION_DENIED: トラッキング中に位置情報の使用が拒否されました';
-                    break;
-                  case 2:
-                    errorDetails =
-                      'POSITION_UNAVAILABLE: トラッキング中に位置情報を取得できませんでした';
-                    break;
-                  case 3:
-                    errorDetails = 'TIMEOUT: トラッキング中に位置情報の取得がタイムアウトしました';
-                    break;
-                  default:
-                    errorDetails = `Unknown tracking error (code: ${error.code})`;
-                }
-
-                alert(`位置情報のトラッキング中にエラーが発生しました:\n${errorDetails}`);
-              },
-              {
-                enableHighAccuracy: false,
-                maximumAge: 30000,
-                timeout: 10000,
-              }
-            );
-          }
+          startLocationWatching(sessionToResume.id);
         } else {
           // アクティブセッションがない場合、記録状態を確認
           const hasVisited = localStorage.getItem('footpath_visited');
@@ -423,83 +446,9 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
       if (document.visibilityState === 'visible' && trackingSession?.isActive && isTracking) {
         // フォアグラウンド復帰時、記録中なら位置情報監視を再開
         console.log('App returned to foreground - resuming position watching');
-        
-        // watchIdが既に存在する場合は一旦クリア
-        if (watchIdRef.current !== null) {
-          navigator.geolocation.clearWatch(watchIdRef.current);
-          watchIdRef.current = null;
-        }
 
-        // 位置情報監視を再開
-        if (navigator.geolocation && trackingSession) {
-          const sessionId = trackingSession.id;
-
-          // バッチ処理タイマー開始
-          if (batchIntervalRef.current) {
-            clearInterval(batchIntervalRef.current);
-          }
-
-          batchIntervalRef.current = setInterval(() => {
-            flushPendingPoints(sessionId);
-          }, optimizationSettings.batchInterval);
-
-          // 位置情報監視開始
-          watchIdRef.current = navigator.geolocation.watchPosition(
-            (position) => {
-              // 位置情報取得処理のタイミングで時間を更新
-              setLastLocationUpdate(new Date());
-
-              if (!validatePosition(position)) return;
-
-              const newLat = position.coords.latitude;
-              const newLng = position.coords.longitude;
-              const now = Date.now();
-
-              if (!shouldUpdatePosition(newLat, newLng)) return;
-
-              const newPoint: GeoPoint = {
-                lat: newLat,
-                lng: newLng,
-                timestamp: new Date(),
-              };
-
-              setCurrentPosition([newLat, newLng]);
-              lastPositionRef.current = { lat: newLat, lng: newLng, timestamp: now };
-
-              pendingPointsRef.current.push(newPoint);
-              setPendingCount(pendingPointsRef.current.length);
-
-              setTrackingSession((prev) => {
-                if (!prev) return null;
-                return { ...prev, points: [...prev.points, newPoint] };
-              });
-            },
-            (error) => {
-              let errorDetails = '';
-              switch (error.code) {
-                case 1:
-                  errorDetails =
-                    'PERMISSION_DENIED: トラッキング中に位置情報の使用が拒否されました';
-                  break;
-                case 2:
-                  errorDetails =
-                    'POSITION_UNAVAILABLE: トラッキング中に位置情報を取得できませんでした';
-                  break;
-                case 3:
-                  errorDetails = 'TIMEOUT: トラッキング中に位置情報の取得がタイムアウトしました';
-                  break;
-                default:
-                  errorDetails = `Unknown tracking error (code: ${error.code})`;
-              }
-
-              alert(`位置情報のトラッキング中にエラーが発生しました:\n${errorDetails}`);
-            },
-            {
-              enableHighAccuracy: false,
-              maximumAge: 30000,
-              timeout: 10000,
-            }
-          );
+        if (trackingSession) {
+          startLocationWatching(trackingSession.id);
         }
       } else if (document.visibilityState === 'hidden' && isTracking) {
         // バックグラウンド時の処理 - リソース節約のため位置情報監視とタイマーを停止
@@ -830,88 +779,9 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
 
     setTrackingSession({ ...newSession, id: sessionId });
 
-    // 既存のバッチ処理タイマーをクリア
-    if (batchIntervalRef.current) {
-      clearInterval(batchIntervalRef.current);
-    }
-
-    // バッチ処理タイマー開始（30秒間隔）
-    batchIntervalRef.current = setInterval(() => {
-      flushPendingPoints(sessionId);
-      console.log('startTracking: flush');
-    }, optimizationSettings.batchInterval);
-
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      (position) => {
-        // 位置情報取得処理のタイミングで時間を更新
-        setLastLocationUpdate(new Date());
-
-        // 位置情報の妥当性チェック
-        if (!validatePosition(position)) {
-          return;
-        }
-
-        // 位置情報を直接使用
-        const newLat = position.coords.latitude;
-        const newLng = position.coords.longitude;
-        const now = Date.now();
-
-        // 距離ベースフィルタリング
-        if (!shouldUpdatePosition(newLat, newLng)) {
-          return;
-        }
-
-        const newPoint: GeoPoint = {
-          lat: newLat,
-          lng: newLng,
-          timestamp: new Date(),
-        };
-
-        // 現在位置更新（UI用）
-        setCurrentPosition([newLat, newLng]);
-        lastPositionRef.current = { lat: newLat, lng: newLng, timestamp: now };
-
-        // ペンディングキューに追加（Firestore更新は後でバッチ処理）
-        pendingPointsRef.current.push(newPoint);
-        setPendingCount(pendingPointsRef.current.length);
-
-        // ローカル状態は即座に更新（UI反応性維持）
-        setTrackingSession((prev) => {
-          if (!prev) return null;
-          return { ...prev, points: [...prev.points, newPoint] };
-        });
-      },
-      (error) => {
-        let errorDetails = '';
-        switch (error.code) {
-          case 1:
-            errorDetails = 'PERMISSION_DENIED: トラッキング中に位置情報の使用が拒否されました';
-            break;
-          case 2:
-            errorDetails = 'POSITION_UNAVAILABLE: トラッキング中に位置情報を取得できませんでした';
-            break;
-          case 3:
-            errorDetails = 'TIMEOUT: トラッキング中に位置情報の取得がタイムアウトしました';
-            break;
-          default:
-            errorDetails = `Unknown tracking error (code: ${error.code})`;
-        }
-
-        alert(`位置情報のトラッキング中にエラーが発生しました:\n${errorDetails}`);
-      },
-      {
-        enableHighAccuracy: false, // バッテリー節約
-        maximumAge: 30000, // 30秒キャッシュ許可
-        timeout: 10000, // 10秒タイムアウト
-      }
-    );
-  }, [
-    userId,
-    optimizationSettings.minDistance,
-    optimizationSettings.batchInterval,
-    flushPendingPoints,
-    shouldUpdatePosition,
-  ]);
+    // 位置情報監視開始
+    startLocationWatching(sessionId);
+  }, [userId, startLocationWatching]);
 
   const stopTracking = async () => {
     setIsTracking(false);
@@ -1266,11 +1136,13 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
               gap: '4px',
             }}
           >
-            <span style={{ color: '#ffffff' }}>
+            <span style={{ color: '#ffffff', fontSize: '16px', fontWeight: 'bold' }}>
               {totalPointsCount + (trackingSession?.points?.length || 0) - pendingCount}
             </span>
-            <span style={{ color: '#94a3b8' }}>:</span>
-            <span style={{ color: '#67e8f9' }}>{pendingCount}</span>
+            <span style={{ color: '#94a3b8', fontSize: '16px', fontWeight: 'bold' }}>:</span>
+            <span style={{ color: '#67e8f9', fontSize: '16px', fontWeight: 'bold' }}>
+              {pendingCount}
+            </span>
           </div>
         </div>
 
@@ -1311,14 +1183,13 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
             }}
           >
             <span style={{ fontSize: '10px' }}>📍</span>
-            <span style={{ color: '#ffffff' }}>
+            <span style={{ color: '#ffffff', fontSize: '16px', fontWeight: 'bold' }}>
               {lastLocationUpdate
                 ? lastLocationUpdate.toLocaleTimeString('ja-JP', {
                     hour: '2-digit',
                     minute: '2-digit',
-                    second: '2-digit',
                   })
-                : '--:--:--'}
+                : '--:--'}
             </span>
           </div>
         </div>
