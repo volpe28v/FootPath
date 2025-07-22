@@ -51,15 +51,50 @@ function App() {
         ></div>
 
         <div className="relative z-10 text-center">
-          {/* ネオン風ローディングテキスト */}
+          {/* FOOTPATHタイトル */}
           <div
-            className="text-4xl font-mono font-bold text-cyan-400 mb-6 animate-pulse"
             style={{
+              fontSize: '48px',
+              fontFamily: 'monospace',
+              fontWeight: 'bold',
+              color: '#67e8f9',
+              marginBottom: '16px',
               textShadow: '0 0 10px #00ffff, 0 0 20px #00ffff, 0 0 30px #00ffff',
-              lineHeight: '1.4',
+              lineHeight: '1.2',
             }}
           >
-            LOADING
+            FOOTPATH
+          </div>
+
+          {/* サブタイトル */}
+          <div
+            style={{
+              fontSize: '14px',
+              fontFamily: 'monospace',
+              color: '#67e8f9',
+              marginBottom: '32px',
+              letterSpacing: '0.15em',
+              textShadow: '0 0 5px #00ffff',
+              lineHeight: '1.6',
+            }}
+          >
+            &gt; GPS TRACKING SYSTEM
+          </div>
+
+          {/* ローディングテキスト */}
+          <div
+            style={{
+              fontSize: '24px',
+              fontFamily: 'monospace',
+              fontWeight: 'bold',
+              color: '#67e8f9',
+              marginBottom: '24px',
+              textShadow: '0 0 8px #00ffff, 0 0 16px #00ffff',
+              lineHeight: '1.4',
+              animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            }}
+          >
+            INITIALIZING...
           </div>
 
           {/* ローディングバー */}
