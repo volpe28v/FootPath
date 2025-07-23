@@ -36,19 +36,7 @@ export function ExploredAreaLayer({ exploredAreas, isVisible }: ExploredAreaLaye
 
         return (
           <div key={`explored-area-${index}-${timestamp}`}>
-            {/* 最外層 - 最も薄い */}
-            <Circle
-              center={[area.lat, area.lng]}
-              radius={area.radius + 20}
-              pathOptions={{
-                fillColor: '#00ffff',
-                fillOpacity: 0.01,
-                color: 'transparent',
-                weight: 0,
-                opacity: 0,
-              }}
-            />
-            {/* 外層2 */}
+            {/* 最外層グロー効果 */}
             <Circle
               center={[area.lat, area.lng]}
               radius={area.radius + 15}
@@ -60,10 +48,10 @@ export function ExploredAreaLayer({ exploredAreas, isVisible }: ExploredAreaLaye
                 opacity: 0,
               }}
             />
-            {/* 外層3 */}
+            {/* 外側グロー効果 */}
             <Circle
               center={[area.lat, area.lng]}
-              radius={area.radius + 12}
+              radius={area.radius + 10}
               pathOptions={{
                 fillColor: '#00ffff',
                 fillOpacity: 0.04,
@@ -72,25 +60,13 @@ export function ExploredAreaLayer({ exploredAreas, isVisible }: ExploredAreaLaye
                 opacity: 0,
               }}
             />
-            {/* 中間層4 */}
-            <Circle
-              center={[area.lat, area.lng]}
-              radius={area.radius + 8}
-              pathOptions={{
-                fillColor: '#00ffff',
-                fillOpacity: 0.06,
-                color: 'transparent',
-                weight: 0,
-                opacity: 0,
-              }}
-            />
-            {/* 中間層5 */}
+            {/* 中間グロー効果 */}
             <Circle
               center={[area.lat, area.lng]}
               radius={area.radius + 5}
               pathOptions={{
                 fillColor: '#00ffff',
-                fillOpacity: 0.08,
+                fillOpacity: 0.06,
                 color: 'transparent',
                 weight: 0,
                 opacity: 0,
@@ -102,7 +78,7 @@ export function ExploredAreaLayer({ exploredAreas, isVisible }: ExploredAreaLaye
               radius={area.radius}
               pathOptions={{
                 fillColor: '#00ffff',
-                fillOpacity: 0.12,
+                fillOpacity: 0.10,
                 color: 'transparent',
                 weight: 0,
                 opacity: 0,

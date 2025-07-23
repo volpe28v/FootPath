@@ -47,6 +47,35 @@ export function generateExploredAreas(
   return areas;
 }
 
+// 増分更新用：新しいポイントを既存エリアに追加
+export function addPointToExploredAreas(
+  existingAreas: ExploredArea[],
+  newPoint: GeoPoint,
+  userId: string,
+  explorationRadius: number = 25
+): ExploredArea[] {
+  const minDistance = explorationRadius * 0.3;
+
+  // 既存のエリアと重複していないかチェック
+  const hasNearbyArea = existingAreas.some((area) => {
+    const distance = calculateDistance(area.lat, area.lng, newPoint.lat, newPoint.lng);
+    return distance < minDistance;
+  });
+
+  if (!hasNearbyArea) {
+    const newArea = {
+      lat: newPoint.lat,
+      lng: newPoint.lng,
+      radius: explorationRadius,
+      timestamp: newPoint.timestamp,
+      userId,
+    };
+    return [...existingAreas, newArea];
+  }
+
+  return existingAreas;
+}
+
 // 探索統計を計算
 export function calculateExplorationStats(exploredAreas: ExploredArea[]): ExplorationStats {
   const totalExploredArea = exploredAreas.reduce((sum, area) => {

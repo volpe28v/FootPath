@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet';
 import type { LatLngExpression } from 'leaflet';
 import L from 'leaflet';
@@ -20,6 +20,7 @@ import type { Photo } from '../types/Photo';
 import { ExploredAreaLayer } from './ExploredAreaLayer';
 import {
   generateExploredAreas,
+  addPointToExploredAreas,
   calculateExplorationStats,
   calculateDistance,
 } from '../utils/explorationUtils';
@@ -304,8 +305,13 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
         if (!prev) return null;
         return { ...prev, points: [...prev.points, newPoint] };
       });
+
+      // 増分更新で探索エリアを効率的に更新
+      setExploredAreas((prevAreas) => {
+        return addPointToExploredAreas(prevAreas, newPoint, userId);
+      });
     },
-    [validatePosition, shouldUpdatePosition]
+    [validatePosition, shouldUpdatePosition, userId]
   );
 
   // 位置情報監視開始の共通関数
@@ -347,15 +353,98 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
     ]
   );
 
-  // 現在のトラッキングセッションの軌跡から探索エリアを更新
-  useEffect(() => {
-    if (trackingSession && trackingSession.points.length > 0) {
-      // 現在のセッションから探索エリアを生成
-      const newExploredAreas = generateExploredAreas(trackingSession.points, userId);
+  // Catmull-Romスプライン補間（メモ化）
+  const interpolateSpline = useCallback((points: [number, number][]) => {
+    if (points.length < 2) return points;
+    if (points.length === 2) return points;
 
+    const interpolated: [number, number][] = [];
+
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = i > 0 ? points[i - 1] : points[i];
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const p3 = i < points.length - 2 ? points[i + 2] : points[i + 1];
+
+      interpolated.push(p1);
+
+      // スプライン補間で中間点を生成（パフォーマンス考慮で10分割に削減）
+      const segments = 10;
+      for (let j = 1; j < segments; j++) {
+        const t = j / segments;
+        const t2 = t * t;
+        const t3 = t2 * t;
+
+        const lat =
+          0.5 *
+          (2 * p1[0] +
+            (-p0[0] + p2[0]) * t +
+            (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 +
+            (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3);
+
+        const lng =
+          0.5 *
+          (2 * p1[1] +
+            (-p0[1] + p2[1]) * t +
+            (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 +
+            (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3);
+
+        interpolated.push([lat, lng] as [number, number]);
+      }
+    }
+
+    // 最後の点を追加
+    interpolated.push(points[points.length - 1]);
+    return interpolated;
+  }, []);
+
+  // ポイント間引き処理（パフォーマンス最適化）
+  const optimizePoints = useCallback((points: [number, number][]) => {
+    if (points.length <= 100) return points; // 100点以下はそのまま
+
+    const step = Math.ceil(points.length / 100); // 最大100点に削減
+    const optimized: [number, number][] = [];
+
+    // 最初の点は必ず含める
+    optimized.push(points[0]);
+
+    // 間引き処理
+    for (let i = step; i < points.length - 1; i += step) {
+      optimized.push(points[i]);
+    }
+
+    // 最後の点は必ず含める
+    if (points.length > 1) {
+      optimized.push(points[points.length - 1]);
+    }
+
+    return optimized;
+  }, []);
+
+  // スプライン補間結果をメモ化
+  const smoothedPositions = useMemo(() => {
+    if (!trackingSession?.points || trackingSession.points.length < 2) {
+      return [];
+    }
+
+    const validPoints = trackingSession.points
+      .filter((point) => point && point.lat && point.lng)
+      .map((point) => [point.lat, point.lng] as [number, number]);
+
+    // パフォーマンス最適化：大量ポイント時は間引き処理
+    const optimizedPoints = optimizePoints(validPoints);
+
+    return interpolateSpline(optimizedPoints);
+  }, [trackingSession?.points, interpolateSpline, optimizePoints]);
+
+  // セッション開始時の初期探索エリア生成（増分更新を避けるため条件を厳格化）
+  useEffect(() => {
+    if (trackingSession && trackingSession.points.length > 0 && exploredAreas.length === 0) {
+      // 初回のみ全体生成、以降は増分更新を使用
+      const newExploredAreas = generateExploredAreas(trackingSession.points, userId);
       setExploredAreas(newExploredAreas);
     }
-  }, [trackingSession?.points?.length, userId, trackingSession]);
+  }, [trackingSession?.id, userId, exploredAreas.length]); // points.lengthを除去して頻繁な更新を回避
 
   // 起動時の孤立セッションクリーンアップ
   useEffect(() => {
@@ -1300,103 +1389,50 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
             isVisible={showExplorationLayer}
           />
 
-          {/* 軌跡線を最上位レイヤーに再配置（スプライン補間） */}
+          {/* 軌跡線を最上位レイヤーに再配置（最適化済みスプライン補間） */}
           {trackingSession &&
             trackingSession.points &&
             trackingSession.points.length > 1 &&
-            (() => {
-              const validPoints = trackingSession.points
-                .filter((point) => point && point.lat && point.lng)
-                .map((point) => [point.lat, point.lng] as [number, number]);
-
-              // Catmull-Romスプライン補間
-              const interpolateSpline = (points: [number, number][]) => {
-                if (points.length < 2) return points;
-                if (points.length === 2) return points;
-
-                const interpolated: [number, number][] = [];
-
-                for (let i = 0; i < points.length - 1; i++) {
-                  const p0 = i > 0 ? points[i - 1] : points[i];
-                  const p1 = points[i];
-                  const p2 = points[i + 1];
-                  const p3 = i < points.length - 2 ? points[i + 2] : points[i + 1];
-
-                  interpolated.push(p1);
-
-                  // スプライン補間で中間点を生成
-                  const segments = 20; // 各区間を20分割
-                  for (let j = 1; j < segments; j++) {
-                    const t = j / segments;
-                    const t2 = t * t;
-                    const t3 = t2 * t;
-
-                    const lat =
-                      0.5 *
-                      (2 * p1[0] +
-                        (-p0[0] + p2[0]) * t +
-                        (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 +
-                        (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3);
-
-                    const lng =
-                      0.5 *
-                      (2 * p1[1] +
-                        (-p0[1] + p2[1]) * t +
-                        (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 +
-                        (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3);
-
-                    interpolated.push([lat, lng] as [number, number]);
-                  }
-                }
-
-                // 最後の点を追加
-                interpolated.push(points[points.length - 1]);
-                return interpolated;
-              };
-
-              const smoothedPositions = interpolateSpline(validPoints);
-
-              return (
-                <>
-                  {/* 外側のグロー効果 */}
-                  <Polyline
-                    positions={smoothedPositions}
-                    pathOptions={{
-                      color: '#ff6b00',
-                      weight: 12,
-                      opacity: 0.2,
-                      lineCap: 'round',
-                      lineJoin: 'round',
-                    }}
-                    pane="tooltipPane"
-                  />
-                  {/* 中間のグロー効果 */}
-                  <Polyline
-                    positions={smoothedPositions}
-                    pathOptions={{
-                      color: '#ff6b00',
-                      weight: 8,
-                      opacity: 0.4,
-                      lineCap: 'round',
-                      lineJoin: 'round',
-                    }}
-                    pane="tooltipPane"
-                  />
-                  {/* メインの線 */}
-                  <Polyline
-                    positions={smoothedPositions}
-                    pathOptions={{
-                      color: '#ffaa44',
-                      weight: 4,
-                      opacity: 0.95,
-                      lineCap: 'round',
-                      lineJoin: 'round',
-                    }}
-                    pane="tooltipPane"
-                  />
-                </>
-              );
-            })()}
+            smoothedPositions.length > 0 && (
+              <>
+                {/* 外側のグロー効果 */}
+                <Polyline
+                  positions={smoothedPositions}
+                  pathOptions={{
+                    color: '#ff6b00',
+                    weight: 12,
+                    opacity: 0.2,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                  }}
+                  pane="tooltipPane"
+                />
+                {/* 中間のグロー効果 */}
+                <Polyline
+                  positions={smoothedPositions}
+                  pathOptions={{
+                    color: '#ff6b00',
+                    weight: 8,
+                    opacity: 0.4,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                  }}
+                  pane="tooltipPane"
+                />
+                {/* メインの線 */}
+                <Polyline
+                  positions={smoothedPositions}
+                  pathOptions={{
+                    color: '#ffaa44',
+                    weight: 4,
+                    opacity: 0.95,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                  }}
+                  pane="tooltipPane"
+                />
+              </>
+            )}
 
           {/* 写真マーカーを最上位に配置 */}
           {photos.map((photo) => (
