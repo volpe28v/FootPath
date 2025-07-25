@@ -116,7 +116,9 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [lastLocationUpdate, setLastLocationUpdate] = useState<Date | null>(null);
+  const [wakeLockSupported, setWakeLockSupported] = useState(false);
   const watchIdRef = useRef<number | null>(null);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const batchIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastPositionRef = useRef<{ lat: number; lng: number; timestamp: number } | null>(null);
   const pendingPointsRef = useRef<GeoPoint[]>([]);
@@ -436,6 +438,49 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
 
     return interpolateSpline(optimizedPoints);
   }, [trackingSession?.points, interpolateSpline, optimizePoints]);
+
+  // Wake Lock API サポートチェック
+  useEffect(() => {
+    if ('wakeLock' in navigator) {
+      setWakeLockSupported(true);
+    }
+  }, []);
+
+  // Wake Lock 管理
+  const requestWakeLock = useCallback(async () => {
+    if (!wakeLockSupported) return false;
+
+    try {
+      wakeLockRef.current = await navigator.wakeLock.request('screen');
+      
+      wakeLockRef.current.addEventListener('release', () => {
+        console.log('Wake Lock released');
+      });
+
+      console.log('Wake Lock acquired');
+      return true;
+    } catch (err) {
+      console.error('Failed to acquire Wake Lock:', err);
+      return false;
+    }
+  }, [wakeLockSupported]);
+
+  const releaseWakeLock = useCallback(async () => {
+    if (wakeLockRef.current) {
+      await wakeLockRef.current.release();
+      wakeLockRef.current = null;
+      console.log('Wake Lock released manually');
+    }
+  }, []);
+
+  // トラッキング開始時にWake Lockを取得（手動制御は削除）
+  // const toggleWakeLock = useCallback(async () => {
+  //   if (isWakeLockActive) {
+  //     await releaseWakeLock();
+  //   } else {
+  //     await requestWakeLock();
+  //   }
+  // }, [isWakeLockActive, requestWakeLock, releaseWakeLock]);
 
   // セッション開始時の初期探索エリア生成（増分更新を避けるため条件を厳格化）
   useEffect(() => {
@@ -868,9 +913,14 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
 
     setTrackingSession({ ...newSession, id: sessionId });
 
+    // Wake Lock取得（記録開始時）
+    if (wakeLockSupported) {
+      await requestWakeLock();
+    }
+
     // 位置情報監視開始
     startLocationWatching(sessionId);
-  }, [userId, startLocationWatching]);
+  }, [userId, startLocationWatching, wakeLockSupported, requestWakeLock]);
 
   const stopTracking = async () => {
     setIsTracking(false);
@@ -901,6 +951,9 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
       // セッション終了後にデータを強制リフレッシュ
       await loadSessionData(true);
     }
+
+    // Wake Lock解放（記録停止時）
+    await releaseWakeLock();
 
     // 状態をリセット
     setTrackingSession(null);
@@ -1066,6 +1119,54 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
         }}
       >
+        {/* 位置情報取得日時表示（一番左） */}
+        <div
+          style={{
+            backgroundColor: '#1e293b',
+            border: '1px solid #475569',
+            borderRadius: '8px',
+            padding: '0 8px',
+            fontFamily: 'monospace',
+            fontWeight: 'bold',
+            fontSize: '11px',
+            position: 'relative',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+            height: '32px',
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              inset: '0',
+              background: lastLocationUpdate
+                ? 'linear-gradient(to right, rgba(34, 197, 94, 0.1), rgba(16, 185, 129, 0.1))'
+                : 'linear-gradient(to right, rgba(107, 114, 128, 0.1), rgba(75, 85, 99, 0.1))',
+              borderRadius: '8px',
+            }}
+          ></div>
+          <div
+            style={{
+              position: 'relative',
+              zIndex: 10,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+            }}
+          >
+            <span style={{ fontSize: '10px' }}>📍</span>
+            <span style={{ color: '#ffffff', fontSize: '16px', fontWeight: 'bold' }}>
+              {lastLocationUpdate
+                ? lastLocationUpdate.toLocaleTimeString('ja-JP', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                : '--:--'}
+            </span>
+          </div>
+        </div>
+
         {/* 記録開始/停止ボタン */}
         <button
           onClick={isTracking ? stopTracking : startTracking}
@@ -1231,54 +1332,6 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
             <span style={{ color: '#94a3b8', fontSize: '16px', fontWeight: 'bold' }}>:</span>
             <span style={{ color: '#67e8f9', fontSize: '16px', fontWeight: 'bold' }}>
               {pendingCount}
-            </span>
-          </div>
-        </div>
-
-        {/* 位置情報取得日時表示 */}
-        <div
-          style={{
-            backgroundColor: '#1e293b',
-            border: '1px solid #475569',
-            borderRadius: '8px',
-            padding: '0 8px',
-            fontFamily: 'monospace',
-            fontWeight: 'bold',
-            fontSize: '11px',
-            position: 'relative',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-            height: '32px',
-            display: 'flex',
-            alignItems: 'center',
-          }}
-        >
-          <div
-            style={{
-              position: 'absolute',
-              inset: '0',
-              background: lastLocationUpdate
-                ? 'linear-gradient(to right, rgba(34, 197, 94, 0.1), rgba(16, 185, 129, 0.1))'
-                : 'linear-gradient(to right, rgba(107, 114, 128, 0.1), rgba(75, 85, 99, 0.1))',
-              borderRadius: '8px',
-            }}
-          ></div>
-          <div
-            style={{
-              position: 'relative',
-              zIndex: 10,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '3px',
-            }}
-          >
-            <span style={{ fontSize: '10px' }}>📍</span>
-            <span style={{ color: '#ffffff', fontSize: '16px', fontWeight: 'bold' }}>
-              {lastLocationUpdate
-                ? lastLocationUpdate.toLocaleTimeString('ja-JP', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })
-                : '--:--'}
             </span>
           </div>
         </div>
