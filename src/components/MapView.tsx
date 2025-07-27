@@ -179,31 +179,34 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
   };
 
   // バッチ処理でFirestoreに送信（増分保存）
-  const flushPendingPoints = async (sessionId: string) => {
-    if (pendingPointsRef.current.length === 0) return;
+  const flushPendingPoints = useCallback(
+    async (sessionId: string) => {
+      if (pendingPointsRef.current.length === 0) return;
 
-    try {
-      const pointsToUpload = [...pendingPointsRef.current];
-      console.log('flushPendingPoints: pointsToUpload: ', pointsToUpload.length);
+      try {
+        const pointsToUpload = [...pendingPointsRef.current];
+        console.log('flushPendingPoints: pointsToUpload: ', pointsToUpload.length);
 
-      // Firestoreに新しいポイントのみを追加
-      const sessionRef = doc(db, 'sessions', sessionId);
-      await updateDoc(sessionRef, {
-        points: arrayUnion(...pointsToUpload),
-        storageMode: 'incremental',
-        minDistance: optimizationSettings.minDistance,
-      });
+        // Firestoreに新しいポイントのみを追加
+        const sessionRef = doc(db, 'sessions', sessionId);
+        await updateDoc(sessionRef, {
+          points: arrayUnion(...pointsToUpload),
+          storageMode: 'incremental',
+          minDistance: 10, // 固定値を使用
+        });
 
-      // 成功後にクリア
-      pendingPointsRef.current = [];
-      setPendingCount(0);
-    } catch (error) {
-      console.error('Failed to flush pending points:', error);
-    }
-  };
+        // 成功後にクリア
+        pendingPointsRef.current = [];
+        setPendingCount(0);
+      } catch (error) {
+        console.error('Failed to flush pending points:', error);
+      }
+    },
+    [setPendingCount]
+  );
 
   // 位置情報の妥当性チェック
-  const validatePosition = (position: GeolocationPosition): boolean => {
+  const validatePosition = useCallback((position: GeolocationPosition): boolean => {
     const { accuracy, latitude, longitude } = position.coords;
     const now = Date.now();
 
@@ -237,29 +240,35 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
     }
 
     return true;
-  };
+  }, []);
 
   // 最適化設定（固定）- useMemoで無駄な再レンダリングを防止
-  const optimizationSettings = useMemo(() => ({
-    minDistance: 10, // 10m間隔で記録
-    batchInterval: 30000, // 30秒間隔でバッチ保存
-  }), []);
+  const optimizationSettings = useMemo(
+    () => ({
+      minDistance: 10, // 10m間隔で記録
+      batchInterval: 30000, // 30秒間隔でバッチ保存
+    }),
+    []
+  );
 
   // 距離ベースの位置更新判定
-  const shouldUpdatePosition = (newLat: number, newLng: number): boolean => {
-    if (!lastPositionRef.current) {
-      return true;
-    }
+  const shouldUpdatePosition = useCallback(
+    (newLat: number, newLng: number): boolean => {
+      if (!lastPositionRef.current) {
+        return true;
+      }
 
-    const distance = calculateDistance(
-      lastPositionRef.current.lat,
-      lastPositionRef.current.lng,
-      newLat,
-      newLng
-    );
+      const distance = calculateDistance(
+        lastPositionRef.current.lat,
+        lastPositionRef.current.lng,
+        newLat,
+        newLng
+      );
 
-    return distance >= optimizationSettings.minDistance;
-  };
+      return distance >= optimizationSettings.minDistance;
+    },
+    [optimizationSettings.minDistance]
+  );
 
   // 位置情報エラーハンドリングの共通関数
   const handleGeolocationError = useCallback((error: GeolocationPositionError) => {
@@ -440,7 +449,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
     const optimizedPoints = optimizePoints(validPoints);
 
     return interpolateSpline(optimizedPoints);
-  }, [trackingSession?.points?.length, trackingSession?.id, interpolateSpline, optimizePoints]);
+  }, [trackingSession?.points, interpolateSpline, optimizePoints]);
 
   // セッション開始時の初期探索エリア生成（増分更新を避けるため条件を厳格化）
   useEffect(() => {
@@ -449,7 +458,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
       const newExploredAreas = generateExploredAreas(trackingSession.points, userId);
       setExploredAreas(newExploredAreas);
     }
-  }, [trackingSession?.id, userId, exploredAreas.length]); // points.lengthを除去して頻繁な更新を回避
+  }, [trackingSession, userId, exploredAreas.length]); // points.lengthを除去して頻繁な更新を回避
 
   // 起動時の孤立セッションクリーンアップ
   useEffect(() => {
@@ -532,7 +541,8 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
     };
 
     cleanupOrphanedSessions();
-  }, [userId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, isTracking, startLocationWatching]);
 
   // ページ終了時のクリーンアップとvisibility管理
   useEffect(() => {
@@ -598,6 +608,8 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
     isTracking,
     flushPendingPoints,
     optimizationSettings,
+    startLocationWatching,
+    trackingSession,
   ]);
 
   // データキャッシュ用のRef
@@ -612,89 +624,105 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
   });
 
   // セッションデータを取得（キャッシュ対応）
-  const loadSessionData = async (forceRefresh = false) => {
-    try {
-      const now = Date.now();
+  const loadSessionData = useCallback(
+    async (forceRefresh = false) => {
+      try {
+        const now = Date.now();
 
-      // キャッシュが有効でforceRefreshでない場合はキャッシュを使用
-      if (
-        !forceRefresh &&
-        dataCache.current.sessions.length > 0 &&
-        now - dataCache.current.lastFetch < dataCache.current.cacheExpiry
-      ) {
-        console.log('Using cached session data');
-        processSessionData(dataCache.current.sessions);
-        return;
-      }
-
-      const sessionsRef = collection(db, 'sessions');
-      const userQuery = query(sessionsRef, where('userId', '==', userId));
-
-      const snapshot = await getDocs(userQuery);
-      const sessions: TrackingSession[] = [];
-
-      snapshot.forEach((doc) => {
-        const session = doc.data() as TrackingSession;
-
-        // pointsのtimestampをDate型に変換
-        if (session.points && session.points.length > 0) {
-          const convertedPoints = session.points.map((point) => ({
-            ...point,
-            timestamp:
-              point.timestamp &&
-              typeof (point.timestamp as unknown as { toDate: () => Date }).toDate === 'function'
-                ? (point.timestamp as unknown as { toDate: () => Date }).toDate()
-                : point.timestamp,
-          }));
-          session.points = convertedPoints;
+        // キャッシュが有効でforceRefreshでない場合はキャッシュを使用
+        if (
+          !forceRefresh &&
+          dataCache.current.sessions.length > 0 &&
+          now - dataCache.current.lastFetch < dataCache.current.cacheExpiry
+        ) {
+          console.log('Using cached session data');
+          // キャッシュデータを直接処理
+          const points: GeoPoint[] = [];
+          dataCache.current.sessions.forEach((session) => {
+            if (session.points && session.points.length > 0 && !session.isActive) {
+              points.push(...session.points);
+            }
+          });
+          
+          setTotalPointsCount(points.length);
+          
+          if (points.length > 0) {
+            const historicalAreas = generateExploredAreas(points, userId);
+            setHistoryExploredAreas(historicalAreas);
+            const historicalStats = calculateExplorationStats(historicalAreas);
+            setExplorationStats(historicalStats);
+          } else {
+            setHistoryExploredAreas([]);
+          }
+          return;
         }
 
-        sessions.push(session);
-      });
+        const sessionsRef = collection(db, 'sessions');
+        const userQuery = query(sessionsRef, where('userId', '==', userId));
 
-      // キャッシュ更新
-      dataCache.current = {
-        sessions,
-        lastFetch: now,
-        cacheExpiry: 5 * 60 * 1000,
-      };
+        const snapshot = await getDocs(userQuery);
+        const sessions: TrackingSession[] = [];
 
-      processSessionData(sessions);
-      console.log('Session data loaded:', sessions.length, 'sessions');
-    } catch (error) {
-      console.error('Error loading session data:', error);
-    }
-  };
+        snapshot.forEach((doc) => {
+          const session = doc.data() as TrackingSession;
 
-  // セッションデータ処理を分離
-  const processSessionData = (sessions: TrackingSession[]) => {
-    const points: GeoPoint[] = [];
+          // pointsのtimestampをDate型に変換
+          if (session.points && session.points.length > 0) {
+            const convertedPoints = session.points.map((point) => ({
+              ...point,
+              timestamp:
+                point.timestamp &&
+                typeof (point.timestamp as unknown as { toDate: () => Date }).toDate === 'function'
+                  ? (point.timestamp as unknown as { toDate: () => Date }).toDate()
+                  : point.timestamp,
+            }));
+            session.points = convertedPoints;
+          }
 
-    sessions.forEach((session) => {
-      if (session.points && session.points.length > 0 && !session.isActive) {
-        points.push(...session.points);
+          sessions.push(session);
+        });
+
+        // キャッシュ更新
+        dataCache.current = {
+          sessions,
+          lastFetch: now,
+          cacheExpiry: 5 * 60 * 1000,
+        };
+
+        // セッションデータを直接処理
+        const points: GeoPoint[] = [];
+
+        sessions.forEach((session) => {
+          if (session.points && session.points.length > 0 && !session.isActive) {
+            points.push(...session.points);
+          }
+        });
+
+        // 総データ数を更新
+        setTotalPointsCount(points.length);
+
+        // 全履歴ポイントから探索エリアを生成
+        if (points.length > 0) {
+          const historicalAreas = generateExploredAreas(points, userId);
+          setHistoryExploredAreas(historicalAreas);
+
+          // 統計を履歴込みで更新
+          const historicalStats = calculateExplorationStats(historicalAreas);
+          setExplorationStats(historicalStats);
+        } else {
+          setHistoryExploredAreas([]);
+        }
+        console.log('Session data loaded:', sessions.length, 'sessions');
+      } catch (error) {
+        console.error('Error loading session data:', error);
       }
-    });
-
-    // 総データ数を更新
-    setTotalPointsCount(points.length);
-
-    // 全履歴ポイントから探索エリアを生成
-    if (points.length > 0) {
-      const historicalAreas = generateExploredAreas(points, userId);
-      setHistoryExploredAreas(historicalAreas);
-
-      // 統計を履歴込みで更新
-      const historicalStats = calculateExplorationStats(historicalAreas);
-      setExplorationStats(historicalStats);
-    } else {
-      setHistoryExploredAreas([]);
-    }
-  };
+    },
+    [userId]
+  );
 
   useEffect(() => {
     loadSessionData();
-  }, [userId]);
+  }, [userId, loadSessionData]);
 
   // 写真データキャッシュ
   const photoCache = useRef<{
@@ -708,61 +736,64 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
   });
 
   // 写真データを取得（キャッシュ対応）
-  const loadPhotoData = async (forceRefresh = false) => {
-    try {
-      const now = Date.now();
+  const loadPhotoData = useCallback(
+    async (forceRefresh = false) => {
+      try {
+        const now = Date.now();
 
-      // キャッシュが有効でforceRefreshでない場合はキャッシュを使用
-      if (
-        !forceRefresh &&
-        photoCache.current.photos.length > 0 &&
-        now - photoCache.current.lastFetch < photoCache.current.cacheExpiry
-      ) {
-        console.log('Using cached photo data');
-        setPhotos(photoCache.current.photos);
-        return;
-      }
+        // キャッシュが有効でforceRefreshでない場合はキャッシュを使用
+        if (
+          !forceRefresh &&
+          photoCache.current.photos.length > 0 &&
+          now - photoCache.current.lastFetch < photoCache.current.cacheExpiry
+        ) {
+          console.log('Using cached photo data');
+          setPhotos(photoCache.current.photos);
+          return;
+        }
 
-      const photosRef = collection(db, 'photos');
-      const photosQuery = query(photosRef, where('userId', '==', userId));
+        const photosRef = collection(db, 'photos');
+        const photosQuery = query(photosRef, where('userId', '==', userId));
 
-      const snapshot = await getDocs(photosQuery);
-      const photoList: Photo[] = [];
+        const snapshot = await getDocs(photosQuery);
+        const photoList: Photo[] = [];
 
-      snapshot.forEach((doc) => {
-        const photoData = doc.data();
-        const photo: Photo = {
-          id: doc.id,
-          userId: photoData.userId,
-          sessionId: photoData.sessionId,
-          location: photoData.location,
-          imageUrl: photoData.imageUrl,
-          thumbnailUrl: photoData.thumbnailUrl || photoData.imageUrl,
-          caption: photoData.caption,
-          timestamp: photoData.timestamp?.toDate() || new Date(),
-          tags: photoData.tags || [],
-          isPublic: photoData.isPublic || false,
+        snapshot.forEach((doc) => {
+          const photoData = doc.data();
+          const photo: Photo = {
+            id: doc.id,
+            userId: photoData.userId,
+            sessionId: photoData.sessionId,
+            location: photoData.location,
+            imageUrl: photoData.imageUrl,
+            thumbnailUrl: photoData.thumbnailUrl || photoData.imageUrl,
+            caption: photoData.caption,
+            timestamp: photoData.timestamp?.toDate() || new Date(),
+            tags: photoData.tags || [],
+            isPublic: photoData.isPublic || false,
+          };
+          photoList.push(photo);
+        });
+
+        // キャッシュ更新
+        photoCache.current = {
+          photos: photoList,
+          lastFetch: now,
+          cacheExpiry: 5 * 60 * 1000,
         };
-        photoList.push(photo);
-      });
 
-      // キャッシュ更新
-      photoCache.current = {
-        photos: photoList,
-        lastFetch: now,
-        cacheExpiry: 5 * 60 * 1000,
-      };
-
-      console.log('Photo data loaded:', photoList.length, 'photos');
-      setPhotos(photoList);
-    } catch (error) {
-      console.error('Error loading photo data:', error);
-    }
-  };
+        console.log('Photo data loaded:', photoList.length, 'photos');
+        setPhotos(photoList);
+      } catch (error) {
+        console.error('Error loading photo data:', error);
+      }
+    },
+    [userId]
+  );
 
   useEffect(() => {
     loadPhotoData();
-  }, [userId]);
+  }, [userId, loadPhotoData]);
 
   // コンポーネントアンマウント時の確実なクリーンアップ
   useEffect(() => {
@@ -861,7 +892,8 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
       setCurrentPosition(tokyoStation);
       setLastLocationUpdate(new Date()); // 非サポート時でも日時を設定
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTracking]);
 
   const startTracking = useCallback(async () => {
     if (!navigator.geolocation) {
@@ -889,7 +921,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
 
     // 位置情報監視開始
     startLocationWatching(sessionId);
-  }, [userId, startLocationWatching]);
+  }, [userId, startLocationWatching, optimizationSettings.minDistance]);
 
   const stopTracking = async () => {
     setIsTracking(false);

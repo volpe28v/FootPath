@@ -78,7 +78,7 @@ export function ExploredAreaLayer({ exploredAreas, isVisible }: ExploredAreaLaye
               radius={area.radius}
               pathOptions={{
                 fillColor: '#00ffff',
-                fillOpacity: 0.10,
+                fillOpacity: 0.1,
                 color: 'transparent',
                 weight: 0,
                 opacity: 0,
