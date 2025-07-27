@@ -46,6 +46,7 @@ L.Icon.Default.mergeOptions({
 // });
 
 // 絵文字マーカーアイコン（フォールバック用）
+// EmojiIconを事前生成（コンポーネント外で1回のみ生成）
 const createEmojiIcon = () => {
   const div = document.createElement('div');
   div.innerHTML = '📍';
@@ -62,7 +63,7 @@ const createEmojiIcon = () => {
   });
 };
 
-// 写真マーカーアイコン
+// 写真マーカーアイコンを事前生成（コンポーネント外で1回のみ生成）
 const createPhotoIcon = () => {
   const div = document.createElement('div');
   div.innerHTML = '📷';
@@ -79,6 +80,10 @@ const createPhotoIcon = () => {
     className: 'photo-marker',
   });
 };
+
+// アイコンを事前生成してキャッシュ
+const emojiIcon = createEmojiIcon();
+const photoIcon = createPhotoIcon();
 
 interface MapViewProps {
   userId: string;
@@ -234,11 +239,11 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
     return true;
   };
 
-  // 最適化設定（固定）
-  const optimizationSettings = {
+  // 最適化設定（固定）- useMemoで無駄な再レンダリングを防止
+  const optimizationSettings = useMemo(() => ({
     minDistance: 10, // 10m間隔で記録
     batchInterval: 30000, // 30秒間隔でバッチ保存
-  };
+  }), []);
 
   // 距離ベースの位置更新判定
   const shouldUpdatePosition = (newLat: number, newLng: number): boolean => {
@@ -368,8 +373,8 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
 
       interpolated.push(p1);
 
-      // スプライン補間で中間点を生成（パフォーマンス考慮で10分割に削減）
-      const segments = 10;
+      // スプライン補間で中間点を生成（パフォーマンス最適化のため5分割に削減）
+      const segments = 5;
       for (let j = 1; j < segments; j++) {
         const t = j / segments;
         const t2 = t * t;
@@ -421,7 +426,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
     return optimized;
   }, []);
 
-  // スプライン補間結果をメモ化
+  // スプライン補間結果をメモ化 - ポイント数とセッションIDのみで再計算判定
   const smoothedPositions = useMemo(() => {
     if (!trackingSession?.points || trackingSession.points.length < 2) {
       return [];
@@ -435,7 +440,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
     const optimizedPoints = optimizePoints(validPoints);
 
     return interpolateSpline(optimizedPoints);
-  }, [trackingSession?.points, interpolateSpline, optimizePoints]);
+  }, [trackingSession?.points?.length, trackingSession?.id, interpolateSpline, optimizePoints]);
 
   // セッション開始時の初期探索エリア生成（増分更新を避けるため条件を厳格化）
   useEffect(() => {
@@ -589,12 +594,10 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [
-    trackingSession,
+    trackingSession?.id,
     isTracking,
     flushPendingPoints,
-    optimizationSettings.batchInterval,
-    validatePosition,
-    shouldUpdatePosition,
+    optimizationSettings,
   ]);
 
   // データキャッシュ用のRef
@@ -760,6 +763,22 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
   useEffect(() => {
     loadPhotoData();
   }, [userId]);
+
+  // コンポーネントアンマウント時の確実なクリーンアップ
+  useEffect(() => {
+    return () => {
+      // 位置情報監視のクリーンアップ
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+      // バッチ処理タイマーのクリーンアップ
+      if (batchIntervalRef.current) {
+        clearInterval(batchIntervalRef.current);
+        batchIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     // デバッグ情報の出力
@@ -1439,7 +1458,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
             <Marker
               key={photo.id}
               position={[photo.location.lat, photo.location.lng]}
-              icon={createPhotoIcon()}
+              icon={photoIcon}
               pane="markerPane"
               zIndexOffset={1000}
             >
@@ -1471,7 +1490,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
           {currentPosition && (
             <Marker
               position={currentPosition}
-              icon={createEmojiIcon()}
+              icon={emojiIcon}
               pane="popupPane"
               zIndexOffset={3000}
             />
