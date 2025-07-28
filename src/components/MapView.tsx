@@ -18,6 +18,7 @@ import type { GeoPoint, TrackingSession } from '../types/GeoPoint';
 import type { ExploredArea, ExplorationStats } from '../types/ExploredArea';
 import type { Photo } from '../types/Photo';
 import { ExploredAreaLayer } from './ExploredAreaLayer';
+import { MapHeader } from './MapHeader';
 import { TRACKING_CONFIG, PHOTO_CONFIG } from '../constants/tracking';
 import {
   generateExploredAreas,
@@ -261,59 +262,6 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
     }),
     []
   );
-
-  // ボタンイベントハンドラー（メモ化）
-  const handleRecordButtonMouseEnter = useCallback(
-    (e: React.MouseEvent<HTMLButtonElement>) => {
-      e.currentTarget.style.transform = 'scale(1.02)';
-      e.currentTarget.style.background = isTracking
-        ? 'linear-gradient(to right, #ef4444, #dc2626)'
-        : 'linear-gradient(to right, #10b981, #059669)';
-    },
-    [isTracking]
-  );
-
-  const handleRecordButtonMouseLeave = useCallback(
-    (e: React.MouseEvent<HTMLButtonElement>) => {
-      e.currentTarget.style.transform = 'scale(1)';
-      e.currentTarget.style.background = isTracking
-        ? 'linear-gradient(to right, #dc2626, #b91c1c)'
-        : 'linear-gradient(to right, #059669, #047857)';
-    },
-    [isTracking]
-  );
-
-  const handleCameraButtonMouseEnter = useCallback(
-    (e: React.MouseEvent<HTMLButtonElement>) => {
-      if (!isUploading) {
-        e.currentTarget.style.transform = 'scale(1.02)';
-        e.currentTarget.style.background = 'linear-gradient(to right, #06b6d4, #0891b2)';
-      }
-    },
-    [isUploading]
-  );
-
-  const handleCameraButtonMouseLeave = useCallback(
-    (e: React.MouseEvent<HTMLButtonElement>) => {
-      if (!isUploading) {
-        e.currentTarget.style.transform = 'scale(1)';
-        e.currentTarget.style.background = 'linear-gradient(to right, #0891b2, #0284c7)';
-      }
-    },
-    [isUploading]
-  );
-
-  const handleUserButtonMouseEnter = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
-    e.currentTarget.style.transform = 'scale(1.05)';
-    e.currentTarget.style.boxShadow = '0 6px 8px -1px rgba(6, 182, 212, 0.3)';
-    e.currentTarget.style.borderColor = '#06b6d4';
-  }, []);
-
-  const handleUserButtonMouseLeave = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
-    e.currentTarget.style.transform = 'scale(1)';
-    e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
-    e.currentTarget.style.borderColor = '#475569';
-  }, []);
 
   // 距離ベースの位置更新判定
   const shouldUpdatePosition = useCallback(
@@ -1161,283 +1109,23 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
       }}
     >
       {/* ヘッダー部分 */}
-      <div
-        style={{
-          background: 'linear-gradient(to right, #1e293b, #0f172a)',
-          borderBottom: '1px solid #334155',
-          padding: '8px 16px',
-          zIndex: 1002,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-        }}
-      >
-        {/* 記録開始/停止ボタン */}
-        <button
-          onClick={isTracking ? stopTracking : startTracking}
-          style={{
-            position: 'relative',
-            padding: '8px 16px',
-            borderRadius: '8px',
-            fontFamily: 'monospace',
-            fontWeight: 'bold',
-            fontSize: '12px',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            transition: 'all 0.2s ease',
-            background: isTracking
-              ? 'linear-gradient(to right, #dc2626, #b91c1c)'
-              : 'linear-gradient(to right, #059669, #047857)',
-            color: '#ffffff',
-            border: 'none',
-            cursor: 'pointer',
-            boxShadow: isTracking
-              ? '0 4px 6px -1px rgba(220, 38, 38, 0.2)'
-              : '0 4px 6px -1px rgba(5, 150, 105, 0.2)',
-            height: '32px',
-            display: 'flex',
-            alignItems: 'center',
-          }}
-          onMouseEnter={handleRecordButtonMouseEnter}
-          onMouseLeave={handleRecordButtonMouseLeave}
-        >
-          <span
-            style={{
-              position: 'relative',
-              zIndex: 10,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            {isTracking ? 'STOP' : 'REC'}
-          </span>
-        </button>
-
-        {/* カメラボタン */}
-        <button
-          onClick={handleCameraClick}
-          disabled={isUploading}
-          style={{
-            position: 'relative',
-            padding: '8px 16px',
-            borderRadius: '8px',
-            fontFamily: 'monospace',
-            fontWeight: 'bold',
-            fontSize: '12px',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            transition: 'all 0.2s ease',
-            background: isUploading ? '#6b7280' : 'linear-gradient(to right, #0891b2, #0284c7)',
-            color: '#ffffff',
-            border: 'none',
-            cursor: isUploading ? 'not-allowed' : 'pointer',
-            opacity: isUploading ? 0.7 : 1,
-            boxShadow: '0 4px 6px -1px rgba(8, 145, 178, 0.2)',
-            height: '32px',
-            display: 'flex',
-            alignItems: 'center',
-          }}
-          onMouseEnter={handleCameraButtonMouseEnter}
-          onMouseLeave={handleCameraButtonMouseLeave}
-        >
-          <span
-            style={{
-              position: 'relative',
-              zIndex: 10,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            {isUploading ? (
-              <div
-                style={{
-                  width: '6px',
-                  height: '6px',
-                  borderRadius: '50%',
-                  backgroundColor: '#ffffff',
-                  animation: 'pulse 2s infinite',
-                }}
-              ></div>
-            ) : (
-              <span style={{ fontSize: '20px' }}>📷</span>
-            )}
-          </span>
-        </button>
-
-        {/* 隠しファイル入力 */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          onChange={handleFileSelect}
-          style={{ display: 'none' }}
-        />
-
-        {/* データ数表示 */}
-        <div
-          style={{
-            backgroundColor: '#1e293b',
-            border: '1px solid #475569',
-            borderRadius: '8px',
-            padding: '0 12px',
-            fontFamily: 'monospace',
-            fontWeight: 'bold',
-            fontSize: '14px',
-            position: 'relative',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-            height: '32px',
-            display: 'flex',
-            alignItems: 'center',
-          }}
-        >
-          <div
-            style={{
-              position: 'absolute',
-              inset: '0',
-              background:
-                'linear-gradient(to right, rgba(6, 182, 212, 0.1), rgba(59, 130, 246, 0.1))',
-              borderRadius: '8px',
-            }}
-          ></div>
-          <div
-            style={{
-              position: 'relative',
-              zIndex: 10,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-            }}
-          >
-            <span style={{ color: '#ffffff', fontSize: '16px', fontWeight: 'bold' }}>
-              {totalPointsCount + (trackingSession?.points?.length || 0) - pendingCount}
-            </span>
-            <span style={{ color: '#94a3b8', fontSize: '16px', fontWeight: 'bold' }}>:</span>
-            <span style={{ color: '#67e8f9', fontSize: '16px', fontWeight: 'bold' }}>
-              {pendingCount}
-            </span>
-          </div>
-        </div>
-
-        {/* 位置情報取得日時表示 */}
-        <div
-          style={{
-            backgroundColor: '#1e293b',
-            border: '1px solid #475569',
-            borderRadius: '8px',
-            padding: '0 8px',
-            fontFamily: 'monospace',
-            fontWeight: 'bold',
-            fontSize: '11px',
-            position: 'relative',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-            height: '32px',
-            display: 'flex',
-            alignItems: 'center',
-          }}
-        >
-          <div
-            style={{
-              position: 'absolute',
-              inset: '0',
-              background: lastLocationUpdate
-                ? 'linear-gradient(to right, rgba(34, 197, 94, 0.1), rgba(16, 185, 129, 0.1))'
-                : 'linear-gradient(to right, rgba(107, 114, 128, 0.1), rgba(75, 85, 99, 0.1))',
-              borderRadius: '8px',
-            }}
-          ></div>
-          <div
-            style={{
-              position: 'relative',
-              zIndex: 10,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '3px',
-            }}
-          >
-            <span style={{ fontSize: '10px' }}>📍</span>
-            <span style={{ color: '#ffffff', fontSize: '16px', fontWeight: 'bold' }}>
-              {lastLocationUpdate
-                ? lastLocationUpdate.toLocaleTimeString('ja-JP', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })
-                : '--:--'}
-            </span>
-          </div>
-        </div>
-
-        {/* ローディングアイコン */}
-        {isUploading && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '8px 12px',
-              backgroundColor: '#1e293b',
-              borderRadius: '8px',
-              border: '1px solid #475569',
-              height: '32px',
-            }}
-          >
-            <div
-              style={{
-                width: '12px',
-                height: '12px',
-                border: '2px solid #67e8f9',
-                borderTop: '2px solid transparent',
-                borderRadius: '50%',
-                animation: 'spin 1s linear infinite',
-              }}
-            ></div>
-            <span style={{ color: '#67e8f9', fontFamily: 'monospace', fontSize: '20px' }}>📷</span>
-          </div>
-        )}
-
-        {/* 右側：Googleアカウントアイコン */}
-        <div style={{ marginLeft: 'auto' }}>
-          <button
-            onClick={onLogout}
-            style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '50%',
-              border: '2px solid #475569',
-              background: '#1e293b',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              padding: '0',
-              overflow: 'hidden',
-            }}
-            onMouseEnter={handleUserButtonMouseEnter}
-            onMouseLeave={handleUserButtonMouseLeave}
-            title={`${user.displayName || 'ユーザー'} - クリックでログアウト`}
-          >
-            {user.photoURL ? (
-              <img
-                src={user.photoURL}
-                alt={user.displayName || ''}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  borderRadius: '50%',
-                  objectFit: 'cover',
-                }}
-              />
-            ) : (
-              <span style={{ fontSize: '16px', color: '#ffffff' }}>👤</span>
-            )}
-          </button>
-        </div>
-      </div>
+      <MapHeader
+        user={user}
+        isTracking={isTracking}
+        totalPointsCount={totalPointsCount}
+        pendingCount={pendingCount}
+        lastLocationUpdate={lastLocationUpdate}
+        isUploading={isUploading}
+        fileInputRef={fileInputRef}
+        onStartTracking={startTracking}
+        onStopTracking={stopTracking}
+        onCameraClick={handleCameraClick}
+        onFileSelect={handleFileSelect}
+        onLogout={onLogout}
+      />
 
       {/* 地図部分 */}
-      <div className="flex-1 relative">
+      <div className="flex-1 relative" style={{ paddingTop: '48px' }}>
         {/* グリッド背景効果 */}
         <div
           className="absolute inset-0 bg-slate-900 opacity-20 z-[1000] pointer-events-none"
@@ -1558,6 +1246,13 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
 
           <LocationUpdater position={currentPosition} />
         </MapContainer>
+
+        {/* Leafletのズームコントロール位置調整 */}
+        <style>{`
+          .leaflet-control-zoom {
+            margin-top: 20px !important;
+          }
+        `}</style>
       </div>
     </div>
   );
