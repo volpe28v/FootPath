@@ -18,6 +18,7 @@ import type { GeoPoint, TrackingSession } from '../types/GeoPoint';
 import type { ExploredArea, ExplorationStats } from '../types/ExploredArea';
 import type { Photo } from '../types/Photo';
 import { ExploredAreaLayer } from './ExploredAreaLayer';
+import { TRACKING_CONFIG, PHOTO_CONFIG } from '../constants/tracking';
 import {
   generateExploredAreas,
   addPointToExploredAreas,
@@ -121,6 +122,13 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [lastLocationUpdate, setLastLocationUpdate] = useState<Date | null>(null);
+
+  // 探索エリアの結合をメモ化（パフォーマンス最適化）
+  const combinedExploredAreas = useMemo(
+    () => [...historyExploredAreas, ...exploredAreas],
+    [historyExploredAreas, exploredAreas]
+  );
+
   const watchIdRef = useRef<number | null>(null);
   const batchIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastPositionRef = useRef<{ lat: number; lng: number; timestamp: number } | null>(null);
@@ -129,7 +137,10 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // サムネイル生成関数
-  const generateThumbnail = (file: File, maxSize: number = 200): Promise<Blob> => {
+  const generateThumbnail = (
+    file: File,
+    maxSize: number = PHOTO_CONFIG.THUMBNAIL_SIZE
+  ): Promise<Blob> => {
     return new Promise((resolve, reject) => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
@@ -245,11 +256,64 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
   // 最適化設定（固定）- useMemoで無駄な再レンダリングを防止
   const optimizationSettings = useMemo(
     () => ({
-      minDistance: 10, // 10m間隔で記録
-      batchInterval: 30000, // 30秒間隔でバッチ保存
+      minDistance: TRACKING_CONFIG.MIN_DISTANCE,
+      batchInterval: TRACKING_CONFIG.BATCH_INTERVAL,
     }),
     []
   );
+
+  // ボタンイベントハンドラー（メモ化）
+  const handleRecordButtonMouseEnter = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.currentTarget.style.transform = 'scale(1.02)';
+      e.currentTarget.style.background = isTracking
+        ? 'linear-gradient(to right, #ef4444, #dc2626)'
+        : 'linear-gradient(to right, #10b981, #059669)';
+    },
+    [isTracking]
+  );
+
+  const handleRecordButtonMouseLeave = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.currentTarget.style.transform = 'scale(1)';
+      e.currentTarget.style.background = isTracking
+        ? 'linear-gradient(to right, #dc2626, #b91c1c)'
+        : 'linear-gradient(to right, #059669, #047857)';
+    },
+    [isTracking]
+  );
+
+  const handleCameraButtonMouseEnter = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (!isUploading) {
+        e.currentTarget.style.transform = 'scale(1.02)';
+        e.currentTarget.style.background = 'linear-gradient(to right, #06b6d4, #0891b2)';
+      }
+    },
+    [isUploading]
+  );
+
+  const handleCameraButtonMouseLeave = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (!isUploading) {
+        e.currentTarget.style.transform = 'scale(1)';
+        e.currentTarget.style.background = 'linear-gradient(to right, #0891b2, #0284c7)';
+      }
+    },
+    [isUploading]
+  );
+
+  const handleUserButtonMouseEnter = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    e.currentTarget.style.transform = 'scale(1.05)';
+    e.currentTarget.style.boxShadow = '0 6px 8px -1px rgba(6, 182, 212, 0.3)';
+    e.currentTarget.style.borderColor = '#06b6d4';
+  }, []);
+
+  const handleUserButtonMouseLeave = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    e.currentTarget.style.transform = 'scale(1)';
+    e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
+    e.currentTarget.style.borderColor = '#475569';
+  }, []);
 
   // 距離ベースの位置更新判定
   const shouldUpdatePosition = useCallback(
@@ -351,11 +415,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
         watchIdRef.current = navigator.geolocation.watchPosition(
           handlePositionUpdate,
           handleGeolocationError,
-          {
-            enableHighAccuracy: false,
-            maximumAge: 30000,
-            timeout: 10000,
-          }
+          TRACKING_CONFIG.GEOLOCATION_OPTIONS.BATTERY_SAVING
         );
       }
     },
@@ -493,16 +553,16 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
 
           const minutesDiff = (now.getTime() - startTime.getTime()) / (1000 * 60);
 
-          if (minutesDiff > 10) {
-            // 10分以上経過したセッションは強制終了
+          if (minutesDiff > TRACKING_CONFIG.SESSION_TIMEOUT / (60 * 1000)) {
+            // 設定時間以上経過したセッションは強制終了
             expiredSessions.push(session);
           } else {
-            // 10分以内のセッションは自動継続
+            // 設定時間以内のセッションは自動継続
             autoResumeSessions.push(session);
           }
         });
 
-        // 10分以上前のセッションは自動的に終了
+        // 設定時間以上前のセッションは自動的に終了
         const cleanupPromises = expiredSessions.map(async (session) => {
           const sessionRef = doc(db, 'sessions', session.id);
           await updateDoc(sessionRef, {
@@ -513,7 +573,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
 
         await Promise.all(cleanupPromises);
 
-        // 10分以内のセッションは自動継続
+        // 設定時間以内のセッションは自動継続
         if (autoResumeSessions.length > 0) {
           const sessionToResume = autoResumeSessions[0];
 
@@ -620,7 +680,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
   }>({
     sessions: [],
     lastFetch: 0,
-    cacheExpiry: 5 * 60 * 1000, // 5分キャッシュ
+    cacheExpiry: TRACKING_CONFIG.CACHE_EXPIRY,
   });
 
   // セッションデータを取得（キャッシュ対応）
@@ -643,9 +703,9 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
               points.push(...session.points);
             }
           });
-          
+
           setTotalPointsCount(points.length);
-          
+
           if (points.length > 0) {
             const historicalAreas = generateExploredAreas(points, userId);
             setHistoryExploredAreas(historicalAreas);
@@ -686,7 +746,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
         dataCache.current = {
           sessions,
           lastFetch: now,
-          cacheExpiry: 5 * 60 * 1000,
+          cacheExpiry: TRACKING_CONFIG.CACHE_EXPIRY,
         };
 
         // セッションデータを直接処理
@@ -732,7 +792,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
   }>({
     photos: [],
     lastFetch: 0,
-    cacheExpiry: 5 * 60 * 1000, // 5分キャッシュ
+    cacheExpiry: TRACKING_CONFIG.CACHE_EXPIRY,
   });
 
   // 写真データを取得（キャッシュ対応）
@@ -779,7 +839,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
         photoCache.current = {
           photos: photoList,
           lastFetch: now,
-          cacheExpiry: 5 * 60 * 1000,
+          cacheExpiry: TRACKING_CONFIG.CACHE_EXPIRY,
         };
 
         console.log('Photo data loaded:', photoList.length, 'photos');
@@ -879,11 +939,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
           setCurrentPosition(tokyoStation);
           setLastLocationUpdate(new Date()); // エラー時のフォールバック位置でも日時を設定
         },
-        {
-          enableHighAccuracy: false, // モバイルでの精度を下げて成功率向上
-          timeout: 15000, // タイムアウトを延長
-          maximumAge: 300000, // 5分間キャッシュを許可
-        }
+        TRACKING_CONFIG.GEOLOCATION_OPTIONS.BATTERY_SAVING
       );
     } else {
       alert('お使いのブラウザは位置情報をサポートしていません');
@@ -982,7 +1038,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
     console.log('Photo selected:', file.name, file.size);
 
     // ファイルサイズチェック（5MB制限）
-    const maxSize = 5 * 1024 * 1024; // 5MB
+    const maxSize = PHOTO_CONFIG.MAX_FILE_SIZE;
     if (file.size > maxSize) {
       alert('ファイルサイズが大きすぎます。5MB以下の画像を選択してください。');
       event.target.value = '';
@@ -1143,18 +1199,8 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
             display: 'flex',
             alignItems: 'center',
           }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'scale(1.02)';
-            e.currentTarget.style.background = isTracking
-              ? 'linear-gradient(to right, #ef4444, #dc2626)'
-              : 'linear-gradient(to right, #10b981, #059669)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'scale(1)';
-            e.currentTarget.style.background = isTracking
-              ? 'linear-gradient(to right, #dc2626, #b91c1c)'
-              : 'linear-gradient(to right, #059669, #047857)';
-          }}
+          onMouseEnter={handleRecordButtonMouseEnter}
+          onMouseLeave={handleRecordButtonMouseLeave}
         >
           <span
             style={{
@@ -1193,18 +1239,8 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
             display: 'flex',
             alignItems: 'center',
           }}
-          onMouseEnter={(e) => {
-            if (!isUploading) {
-              e.currentTarget.style.transform = 'scale(1.02)';
-              e.currentTarget.style.background = 'linear-gradient(to right, #06b6d4, #0891b2)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!isUploading) {
-              e.currentTarget.style.transform = 'scale(1)';
-              e.currentTarget.style.background = 'linear-gradient(to right, #0891b2, #0284c7)';
-            }
-          }}
+          onMouseEnter={handleCameraButtonMouseEnter}
+          onMouseLeave={handleCameraButtonMouseLeave}
         >
           <span
             style={{
@@ -1378,16 +1414,8 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
               padding: '0',
               overflow: 'hidden',
             }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'scale(1.05)';
-              e.currentTarget.style.boxShadow = '0 6px 8px -1px rgba(6, 182, 212, 0.3)';
-              e.currentTarget.style.borderColor = '#06b6d4';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'scale(1)';
-              e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
-              e.currentTarget.style.borderColor = '#475569';
-            }}
+            onMouseEnter={handleUserButtonMouseEnter}
+            onMouseLeave={handleUserButtonMouseLeave}
             title={`${user.displayName || 'ユーザー'} - クリックでログアウト`}
           >
             {user.photoURL ? (
@@ -1436,7 +1464,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
           {/* 写真マーカー */}
 
           <ExploredAreaLayer
-            exploredAreas={[...historyExploredAreas, ...exploredAreas]}
+            exploredAreas={combinedExploredAreas}
             isVisible={showExplorationLayer}
           />
 
