@@ -12,20 +12,14 @@ import {
   arrayUnion,
   getDocs,
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, auth } from '../firebase';
+import { db } from '../firebase';
 import type { GeoPoint, TrackingSession } from '../types/GeoPoint';
-import type { ExploredArea, ExplorationStats } from '../types/ExploredArea';
-import type { Photo } from '../types/Photo';
 import { ExploredAreaLayer } from './ExploredAreaLayer';
 import { MapHeader } from './MapHeader';
-import { TRACKING_CONFIG, PHOTO_CONFIG } from '../constants/tracking';
-import {
-  generateExploredAreas,
-  addPointToExploredAreas,
-  calculateExplorationStats,
-  calculateDistance,
-} from '../utils/explorationUtils';
+import { usePhotoUpload } from '../hooks/usePhotoUpload';
+import { useDataManagement } from '../hooks/useDataManagement';
+import { TRACKING_CONFIG } from '../constants/tracking';
+import { addPointToExploredAreas, calculateDistance } from '../utils/explorationUtils';
 import 'leaflet/dist/leaflet.css';
 
 // Leafletのデフォルトマーカーアイコンを修正
@@ -109,86 +103,36 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
   const [currentPosition, setCurrentPosition] = useState<LatLngExpression | null>(null);
   const [isTracking, setIsTracking] = useState(false);
   const [trackingSession, setTrackingSession] = useState<TrackingSession | null>(null);
-  const [exploredAreas, setExploredAreas] = useState<ExploredArea[]>([]);
-  const [historyExploredAreas, setHistoryExploredAreas] = useState<ExploredArea[]>([]);
-  const [, setExplorationStats] = useState<ExplorationStats>({
-    totalExploredArea: 0,
-    exploredPoints: 0,
-    explorationLevel: 1,
-    explorationPercentage: 0,
-  });
-  const [showExplorationLayer] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
-  const [totalPointsCount, setTotalPointsCount] = useState(0);
-  const [photos, setPhotos] = useState<Photo[]>([]);
-  const [isUploading, setIsUploading] = useState(false);
   const [lastLocationUpdate, setLastLocationUpdate] = useState<Date | null>(null);
 
-  // 探索エリアの結合をメモ化（パフォーマンス最適化）
-  const combinedExploredAreas = useMemo(
-    () => [...historyExploredAreas, ...exploredAreas],
-    [historyExploredAreas, exploredAreas]
-  );
+  // データ管理機能をカスタムフックで管理
+  const {
+    setExploredAreas,
+    combinedExploredAreas,
+    totalPointsCount,
+    showExplorationLayer,
+    loadSessionData,
+  } = useDataManagement({
+    userId,
+  });
 
   const watchIdRef = useRef<number | null>(null);
   const batchIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastPositionRef = useRef<{ lat: number; lng: number; timestamp: number } | null>(null);
   const pendingPointsRef = useRef<GeoPoint[]>([]);
   const autoStartRef = useRef<boolean>(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // サムネイル生成関数
-  const generateThumbnail = (
-    file: File,
-    maxSize: number = PHOTO_CONFIG.THUMBNAIL_SIZE
-  ): Promise<Blob> => {
-    return new Promise((resolve, reject) => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      const img = new Image();
-
-      img.onload = () => {
-        // アスペクト比を保持しながらリサイズ
-        const { width, height } = img;
-        let newWidth = width;
-        let newHeight = height;
-
-        if (width > height) {
-          if (width > maxSize) {
-            newWidth = maxSize;
-            newHeight = (height * maxSize) / width;
-          }
-        } else {
-          if (height > maxSize) {
-            newHeight = maxSize;
-            newWidth = (width * maxSize) / height;
-          }
-        }
-
-        canvas.width = newWidth;
-        canvas.height = newHeight;
-
-        // 画像を描画
-        ctx?.drawImage(img, 0, 0, newWidth, newHeight);
-
-        // Blobに変換
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              resolve(blob);
-            } else {
-              reject(new Error('サムネイル生成に失敗しました'));
-            }
-          },
-          'image/jpeg',
-          0.7 // 品質70%
-        );
-      };
-
-      img.onerror = () => reject(new Error('画像の読み込みに失敗しました'));
-      img.src = URL.createObjectURL(file);
+  // 写真アップロード機能をカスタムフックで管理
+  const { photos, isUploading, fileInputRef, handleCameraClick, handleFileSelect, loadPhotoData } =
+    usePhotoUpload({
+      userId,
+      currentPosition,
+      trackingSessionId: trackingSession?.id,
+      onUploadComplete: () => {
+        console.log('Photo upload completed');
+      },
     });
-  };
 
   // バッチ処理でFirestoreに送信（増分保存）
   const flushPendingPoints = useCallback(
@@ -337,7 +281,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
         return addPointToExploredAreas(prevAreas, newPoint, userId);
       });
     },
-    [validatePosition, shouldUpdatePosition, userId]
+    [validatePosition, shouldUpdatePosition, userId, setExploredAreas]
   );
 
   // 位置情報監視開始の共通関数
@@ -458,15 +402,6 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
 
     return interpolateSpline(optimizedPoints);
   }, [trackingSession?.points, interpolateSpline, optimizePoints]);
-
-  // セッション開始時の初期探索エリア生成（増分更新を避けるため条件を厳格化）
-  useEffect(() => {
-    if (trackingSession && trackingSession.points.length > 0 && exploredAreas.length === 0) {
-      // 初回のみ全体生成、以降は増分更新を使用
-      const newExploredAreas = generateExploredAreas(trackingSession.points, userId);
-      setExploredAreas(newExploredAreas);
-    }
-  }, [trackingSession, userId, exploredAreas.length]); // points.lengthを除去して頻繁な更新を回避
 
   // 起動時の孤立セッションクリーンアップ
   useEffect(() => {
@@ -620,188 +555,10 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
     trackingSession,
   ]);
 
-  // データキャッシュ用のRef
-  const dataCache = useRef<{
-    sessions: TrackingSession[];
-    lastFetch: number;
-    cacheExpiry: number;
-  }>({
-    sessions: [],
-    lastFetch: 0,
-    cacheExpiry: TRACKING_CONFIG.CACHE_EXPIRY,
-  });
-
-  // セッションデータを取得（キャッシュ対応）
-  const loadSessionData = useCallback(
-    async (forceRefresh = false) => {
-      try {
-        const now = Date.now();
-
-        // キャッシュが有効でforceRefreshでない場合はキャッシュを使用
-        if (
-          !forceRefresh &&
-          dataCache.current.sessions.length > 0 &&
-          now - dataCache.current.lastFetch < dataCache.current.cacheExpiry
-        ) {
-          console.log('Using cached session data');
-          // キャッシュデータを直接処理
-          const points: GeoPoint[] = [];
-          dataCache.current.sessions.forEach((session) => {
-            if (session.points && session.points.length > 0 && !session.isActive) {
-              points.push(...session.points);
-            }
-          });
-
-          setTotalPointsCount(points.length);
-
-          if (points.length > 0) {
-            const historicalAreas = generateExploredAreas(points, userId);
-            setHistoryExploredAreas(historicalAreas);
-            const historicalStats = calculateExplorationStats(historicalAreas);
-            setExplorationStats(historicalStats);
-          } else {
-            setHistoryExploredAreas([]);
-          }
-          return;
-        }
-
-        const sessionsRef = collection(db, 'sessions');
-        const userQuery = query(sessionsRef, where('userId', '==', userId));
-
-        const snapshot = await getDocs(userQuery);
-        const sessions: TrackingSession[] = [];
-
-        snapshot.forEach((doc) => {
-          const session = doc.data() as TrackingSession;
-
-          // pointsのtimestampをDate型に変換
-          if (session.points && session.points.length > 0) {
-            const convertedPoints = session.points.map((point) => ({
-              ...point,
-              timestamp:
-                point.timestamp &&
-                typeof (point.timestamp as unknown as { toDate: () => Date }).toDate === 'function'
-                  ? (point.timestamp as unknown as { toDate: () => Date }).toDate()
-                  : point.timestamp,
-            }));
-            session.points = convertedPoints;
-          }
-
-          sessions.push(session);
-        });
-
-        // キャッシュ更新
-        dataCache.current = {
-          sessions,
-          lastFetch: now,
-          cacheExpiry: TRACKING_CONFIG.CACHE_EXPIRY,
-        };
-
-        // セッションデータを直接処理
-        const points: GeoPoint[] = [];
-
-        sessions.forEach((session) => {
-          if (session.points && session.points.length > 0 && !session.isActive) {
-            points.push(...session.points);
-          }
-        });
-
-        // 総データ数を更新
-        setTotalPointsCount(points.length);
-
-        // 全履歴ポイントから探索エリアを生成
-        if (points.length > 0) {
-          const historicalAreas = generateExploredAreas(points, userId);
-          setHistoryExploredAreas(historicalAreas);
-
-          // 統計を履歴込みで更新
-          const historicalStats = calculateExplorationStats(historicalAreas);
-          setExplorationStats(historicalStats);
-        } else {
-          setHistoryExploredAreas([]);
-        }
-        console.log('Session data loaded:', sessions.length, 'sessions');
-      } catch (error) {
-        console.error('Error loading session data:', error);
-      }
-    },
-    [userId]
-  );
-
-  useEffect(() => {
-    loadSessionData();
-  }, [userId, loadSessionData]);
-
-  // 写真データキャッシュ
-  const photoCache = useRef<{
-    photos: Photo[];
-    lastFetch: number;
-    cacheExpiry: number;
-  }>({
-    photos: [],
-    lastFetch: 0,
-    cacheExpiry: TRACKING_CONFIG.CACHE_EXPIRY,
-  });
-
-  // 写真データを取得（キャッシュ対応）
-  const loadPhotoData = useCallback(
-    async (forceRefresh = false) => {
-      try {
-        const now = Date.now();
-
-        // キャッシュが有効でforceRefreshでない場合はキャッシュを使用
-        if (
-          !forceRefresh &&
-          photoCache.current.photos.length > 0 &&
-          now - photoCache.current.lastFetch < photoCache.current.cacheExpiry
-        ) {
-          console.log('Using cached photo data');
-          setPhotos(photoCache.current.photos);
-          return;
-        }
-
-        const photosRef = collection(db, 'photos');
-        const photosQuery = query(photosRef, where('userId', '==', userId));
-
-        const snapshot = await getDocs(photosQuery);
-        const photoList: Photo[] = [];
-
-        snapshot.forEach((doc) => {
-          const photoData = doc.data();
-          const photo: Photo = {
-            id: doc.id,
-            userId: photoData.userId,
-            sessionId: photoData.sessionId,
-            location: photoData.location,
-            imageUrl: photoData.imageUrl,
-            thumbnailUrl: photoData.thumbnailUrl || photoData.imageUrl,
-            caption: photoData.caption,
-            timestamp: photoData.timestamp?.toDate() || new Date(),
-            tags: photoData.tags || [],
-            isPublic: photoData.isPublic || false,
-          };
-          photoList.push(photo);
-        });
-
-        // キャッシュ更新
-        photoCache.current = {
-          photos: photoList,
-          lastFetch: now,
-          cacheExpiry: TRACKING_CONFIG.CACHE_EXPIRY,
-        };
-
-        console.log('Photo data loaded:', photoList.length, 'photos');
-        setPhotos(photoList);
-      } catch (error) {
-        console.error('Error loading photo data:', error);
-      }
-    },
-    [userId]
-  );
-
+  // 写真データの初回ロード
   useEffect(() => {
     loadPhotoData();
-  }, [userId, loadPhotoData]);
+  }, [loadPhotoData]);
 
   // コンポーネントアンマウント時の確実なクリーンアップ
   useEffect(() => {
@@ -962,139 +719,6 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
     lastPositionRef.current = null;
     pendingPointsRef.current = [];
     setPendingCount(0);
-  };
-
-  // カメラボタンクリック（標準カメラアプリを起動）
-  const handleCameraClick = () => {
-    if (!currentPosition) {
-      alert('位置情報を取得してから写真を撮影してください');
-      return;
-    }
-
-    if (fileInputRef.current) {
-      fileInputRef.current.click();
-    }
-  };
-
-  // ファイル選択時の処理
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file || !currentPosition) {
-      return;
-    }
-
-    console.log('Photo selected:', file.name, file.size);
-
-    // ファイルサイズチェック（5MB制限）
-    const maxSize = PHOTO_CONFIG.MAX_FILE_SIZE;
-    if (file.size > maxSize) {
-      alert('ファイルサイズが大きすぎます。5MB以下の画像を選択してください。');
-      event.target.value = '';
-      return;
-    }
-
-    try {
-      // 認証状態確認
-      const currentUser = auth.currentUser;
-      if (!currentUser) {
-        alert('写真をアップロードするには認証が必要です');
-        event.target.value = '';
-        return;
-      }
-
-      console.log('Current user:', currentUser.uid);
-      console.log('User ID from props:', userId);
-
-      // アップロード開始
-      setIsUploading(true);
-
-      // ファイル名を生成（タイムスタンプ + ランダム文字列）
-      const timestamp = new Date().getTime();
-      const randomId = Math.random().toString(36).substring(2, 15);
-      const fileExtension = file.name.split('.').pop() || 'jpg';
-      const fileName = `photos/${currentUser.uid}/${timestamp}_${randomId}.${fileExtension}`;
-      const thumbFileName = `photos/${currentUser.uid}/${timestamp}_${randomId}_thumb.${fileExtension}`;
-
-      console.log('Uploading original to:', fileName);
-      console.log('Uploading thumbnail to:', thumbFileName);
-
-      // サムネイル生成
-      console.log('Generating thumbnail...');
-      const thumbnailBlob = await generateThumbnail(file, 200);
-      console.log('Thumbnail generated, size:', thumbnailBlob.size);
-
-      // 元画像をFirebase Storageにアップロード
-      const storageRef = ref(storage, fileName);
-      const uploadResult = await uploadBytes(storageRef, file);
-      console.log('Original upload successful:', uploadResult);
-
-      // サムネイルをFirebase Storageにアップロード
-      const thumbStorageRef = ref(storage, thumbFileName);
-      const thumbUploadResult = await uploadBytes(thumbStorageRef, thumbnailBlob);
-      console.log('Thumbnail upload successful:', thumbUploadResult);
-
-      // ダウンロードURLを取得
-      const downloadURL = await getDownloadURL(uploadResult.ref);
-      const thumbnailURL = await getDownloadURL(thumbUploadResult.ref);
-      console.log('Original URL:', downloadURL);
-      console.log('Thumbnail URL:', thumbnailURL);
-
-      // Firestoreに写真情報を保存
-      const photoData = {
-        userId: currentUser.uid,
-        sessionId: trackingSession?.id || null,
-        location: {
-          lat: Array.isArray(currentPosition)
-            ? currentPosition[0]
-            : (currentPosition as { lat: number }).lat,
-          lng: Array.isArray(currentPosition)
-            ? currentPosition[1]
-            : (currentPosition as { lng: number }).lng,
-        },
-        imageUrl: downloadURL,
-        thumbnailUrl: thumbnailURL,
-        fileName: file.name,
-        fileSize: file.size,
-        thumbnailSize: thumbnailBlob.size,
-        timestamp: new Date(),
-        isPublic: false, // デフォルトは非公開
-        createdAt: new Date(),
-      };
-
-      console.log('Saving photo data to Firestore:', photoData);
-
-      try {
-        const docRef = await addDoc(collection(db, 'photos'), photoData);
-        console.log('Photo saved with ID:', docRef.id);
-
-        // 写真アップロード後に写真データを強制リフレッシュ
-        await loadPhotoData(true);
-      } catch (firestoreError) {
-        console.error('Firestore save error:', firestoreError);
-        setIsUploading(false);
-        // Storageアップロードは成功したので、そのことをユーザーに伝える
-        alert(
-          `写真「${file.name}」のアップロードは成功しましたが、データベースへの保存でエラーが発生しました。`
-        );
-        event.target.value = '';
-        return;
-      }
-
-      // 成功時の処理
-      setIsUploading(false);
-      alert(`写真「${file.name}」をアップロードしました！`);
-
-      // ファイル入力をリセット（同じファイルを再選択可能にする）
-      event.target.value = '';
-    } catch (error) {
-      console.error('Photo upload error:', error);
-      setIsUploading(false);
-      alert(
-        '写真のアップロードに失敗しました: ' +
-          (error instanceof Error ? error.message : 'Unknown error')
-      );
-      event.target.value = '';
-    }
   };
 
   return (
