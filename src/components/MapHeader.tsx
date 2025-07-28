@@ -196,9 +196,10 @@ export const MapHeader = React.memo<MapHeaderProps>(
             fontFamily: 'monospace',
             fontSize: '12px',
             fontWeight: '600',
-            minWidth: '80px',
+            minWidth: '48px',
             textAlign: 'center',
             height: '32px',
+            boxSizing: 'border-box',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -222,10 +223,13 @@ export const MapHeader = React.memo<MapHeaderProps>(
               fontFamily: 'monospace',
               fontSize: '12px',
               fontWeight: '600',
+              minWidth: '48px',
               display: 'flex',
               alignItems: 'center',
+              justifyContent: 'center',
               gap: '4px',
               height: '32px',
+              boxSizing: 'border-box',
             }}
           >
             <span style={{ fontSize: '12px', lineHeight: '1' }}>📍</span>
