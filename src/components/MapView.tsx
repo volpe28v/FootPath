@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, Marker, Popup } from 'react-leaflet';
 import type { LatLngExpression } from 'leaflet';
-import L from 'leaflet';
 import {
   collection,
   addDoc,
@@ -16,87 +15,24 @@ import { db } from '../firebase';
 import type { GeoPoint, TrackingSession } from '../types/GeoPoint';
 import { ExploredAreaLayer } from './ExploredAreaLayer';
 import { MapHeader } from './MapHeader';
+import { LocationUpdater } from './LocationUpdater';
 import { usePhotoUpload } from '../hooks/usePhotoUpload';
 import { useDataManagement } from '../hooks/useDataManagement';
 import { TRACKING_CONFIG } from '../constants/tracking';
 import { addPointToExploredAreas, calculateDistance } from '../utils/explorationUtils';
+import { emojiIcon, photoIcon } from '../utils/mapIcons';
+import { interpolateSpline, optimizePoints } from '../utils/splineInterpolation';
+import { configureLeafletDefaults } from '../constants/leaflet';
+import { MAP_STYLES } from '../constants/ui';
 import 'leaflet/dist/leaflet.css';
 
-// Leafletのデフォルトマーカーアイコンを修正
-delete (L.Icon.Default.prototype as unknown as { _getIconUrl: unknown })._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
-
-// カスタム位置マーカーアイコン（予備用）
-// const locationIcon = new L.Icon({
-//   iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-//   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-//   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-//   iconSize: [25, 41],
-//   iconAnchor: [12, 41],
-//   popupAnchor: [1, -34],
-//   shadowSize: [41, 41]
-// });
-
-// 絵文字マーカーアイコン（フォールバック用）
-// EmojiIconを事前生成（コンポーネント外で1回のみ生成）
-const createEmojiIcon = () => {
-  const div = document.createElement('div');
-  div.innerHTML = '📍';
-  div.style.fontSize = '24px';
-  div.style.textAlign = 'center';
-  div.style.lineHeight = '1';
-
-  return new L.DivIcon({
-    html: div.outerHTML,
-    iconSize: [24, 24],
-    iconAnchor: [12, 24],
-    popupAnchor: [0, -24],
-    className: 'emoji-marker',
-  });
-};
-
-// 写真マーカーアイコンを事前生成（コンポーネント外で1回のみ生成）
-const createPhotoIcon = () => {
-  const div = document.createElement('div');
-  div.innerHTML = '📷';
-  div.style.fontSize = '28px';
-  div.style.textAlign = 'center';
-  div.style.lineHeight = '1';
-  div.style.filter = 'drop-shadow(2px 2px 4px rgba(0,0,0,0.5))';
-
-  return new L.DivIcon({
-    html: div.outerHTML,
-    iconSize: [28, 28],
-    iconAnchor: [14, 28],
-    popupAnchor: [0, -28],
-    className: 'photo-marker',
-  });
-};
-
-// アイコンを事前生成してキャッシュ
-const emojiIcon = createEmojiIcon();
-const photoIcon = createPhotoIcon();
+// Leafletのデフォルト設定を適用
+configureLeafletDefaults();
 
 interface MapViewProps {
   userId: string;
   user: { displayName: string | null; photoURL: string | null };
   onLogout: () => void;
-}
-
-function LocationUpdater({ position }: { position: LatLngExpression | null }) {
-  const map = useMap();
-
-  useEffect(() => {
-    if (position) {
-      map.setView(position, map.getZoom());
-    }
-  }, [position, map]);
-
-  return null;
 }
 
 export function MapView({ userId, user, onLogout }: MapViewProps) {
@@ -319,74 +255,6 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
     ]
   );
 
-  // Catmull-Romスプライン補間（メモ化）
-  const interpolateSpline = useCallback((points: [number, number][]) => {
-    if (points.length < 2) return points;
-    if (points.length === 2) return points;
-
-    const interpolated: [number, number][] = [];
-
-    for (let i = 0; i < points.length - 1; i++) {
-      const p0 = i > 0 ? points[i - 1] : points[i];
-      const p1 = points[i];
-      const p2 = points[i + 1];
-      const p3 = i < points.length - 2 ? points[i + 2] : points[i + 1];
-
-      interpolated.push(p1);
-
-      // スプライン補間で中間点を生成（パフォーマンス最適化のため5分割に削減）
-      const segments = 5;
-      for (let j = 1; j < segments; j++) {
-        const t = j / segments;
-        const t2 = t * t;
-        const t3 = t2 * t;
-
-        const lat =
-          0.5 *
-          (2 * p1[0] +
-            (-p0[0] + p2[0]) * t +
-            (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 +
-            (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3);
-
-        const lng =
-          0.5 *
-          (2 * p1[1] +
-            (-p0[1] + p2[1]) * t +
-            (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 +
-            (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3);
-
-        interpolated.push([lat, lng] as [number, number]);
-      }
-    }
-
-    // 最後の点を追加
-    interpolated.push(points[points.length - 1]);
-    return interpolated;
-  }, []);
-
-  // ポイント間引き処理（パフォーマンス最適化）
-  const optimizePoints = useCallback((points: [number, number][]) => {
-    if (points.length <= 100) return points; // 100点以下はそのまま
-
-    const step = Math.ceil(points.length / 100); // 最大100点に削減
-    const optimized: [number, number][] = [];
-
-    // 最初の点は必ず含める
-    optimized.push(points[0]);
-
-    // 間引き処理
-    for (let i = step; i < points.length - 1; i += step) {
-      optimized.push(points[i]);
-    }
-
-    // 最後の点は必ず含める
-    if (points.length > 1) {
-      optimized.push(points[points.length - 1]);
-    }
-
-    return optimized;
-  }, []);
-
   // スプライン補間結果をメモ化 - ポイント数とセッションIDのみで再計算判定
   const smoothedPositions = useMemo(() => {
     if (!trackingSession?.points || trackingSession.points.length < 2) {
@@ -401,7 +269,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
     const optimizedPoints = optimizePoints(validPoints);
 
     return interpolateSpline(optimizedPoints);
-  }, [trackingSession?.points, interpolateSpline, optimizePoints]);
+  }, [trackingSession?.points]);
 
   // 起動時の孤立セッションクリーンアップ
   useEffect(() => {
@@ -753,13 +621,7 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
         {/* グリッド背景効果 */}
         <div
           className="absolute inset-0 bg-slate-900 opacity-20 z-[1000] pointer-events-none"
-          style={{
-            backgroundImage: `
-                 linear-gradient(rgba(34, 197, 94, 0.1) 1px, transparent 1px),
-                 linear-gradient(90deg, rgba(34, 197, 94, 0.1) 1px, transparent 1px)
-               `,
-            backgroundSize: '20px 20px',
-          }}
+          style={MAP_STYLES.GRID_BACKGROUND}
         ></div>
 
         <MapContainer

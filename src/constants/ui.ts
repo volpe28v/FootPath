@@ -110,4 +110,11 @@ export const MAP_STYLES = {
     weight: 0,
     opacity: 0,
   },
+  GRID_BACKGROUND: {
+    backgroundImage: `
+      linear-gradient(rgba(34, 197, 94, 0.1) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(34, 197, 94, 0.1) 1px, transparent 1px)
+    `,
+    backgroundSize: '20px 20px',
+  },
 } as const;
