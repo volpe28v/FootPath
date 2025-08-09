@@ -582,9 +582,9 @@ export function MapView({ userId, user, onLogout }: MapViewProps) {
       await loadSessionData(true);
     }
 
-    // 状態をリセット
+    // 状態をリセット（最後の位置は保持）
     setTrackingSession(null);
-    lastPositionRef.current = null;
+    // lastPositionRef.current = null; // 最後の位置を保持するためコメントアウト
     pendingPointsRef.current = [];
     setPendingCount(0);
   };
